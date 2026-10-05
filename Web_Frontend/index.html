@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Velocity | GST Billing</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-slate-50 text-slate-800">
+  <main class="mx-auto max-w-xl px-4 py-16">
+    <h1 class="text-3xl font-bold">Velocity</h1>
+    <p class="mt-2 text-slate-600">GST billing, inventory and accounting.</p>
+
+    <h2 class="mt-10 text-sm font-semibold uppercase tracking-wide text-slate-500">
+      System status
+    </h2>
+    <ul class="mt-3 divide-y rounded-lg border bg-white">
+      <li class="flex items-center justify-between p-4">
+        <span>Frontend (Vercel)</span>
+        <span id="status-frontend" class="text-sm font-medium text-green-600">Online</span>
+      </li>
+      <li class="flex items-center justify-between p-4">
+        <span>Backend (Render)</span>
+        <span id="status-backend" class="text-sm font-medium text-slate-400">Checking...</span>
+      </li>
+      <li class="flex items-center justify-between p-4">
+        <span>Database (Neon)</span>
+        <span id="status-database" class="text-sm font-medium text-slate-400">Checking...</span>
+      </li>
+    </ul>
+    <p id="wake-note" class="mt-3 hidden text-sm text-amber-600">
+      The free backend may be waking up. This can take up to a minute.
+    </p>
+  </main>
+
+  <script src="config.js"></script>
+  <script>
+    // Free-tier Render sleeps when idle, so allow a long first response.
+    const TIMEOUT_MS = 70000;
+
+    /** GET a JSON endpoint from the API with a timeout. */
+    async function getJson(path) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+      try {
+        const response = await fetch(`${API_BASE_URL}${path}`, { signal: controller.signal });
+        return { ok: response.ok, data: await response.json() };
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    /** Update a status label. Uses textContent (never innerHTML) to stay XSS-safe. */
+    function setStatus(id, ok, text) {
+      const el = document.getElementById(id);
+      el.textContent = text;
+      el.className = "text-sm font-medium " + (ok ? "text-green-600" : "text-red-600");
+    }
+
+    async function checkSystem() {
+      const wakeNote = document.getElementById("wake-note");
+      const noteTimer = setTimeout(() => wakeNote.classList.remove("hidden"), 3000);
+
+      try {
+        const backend = await getJson("/health/");
+        setStatus("status-backend", backend.ok, backend.ok ? "Online" : "Error");
+      } catch {
+        setStatus("status-backend", false, "Unreachable (check CORS and URL)");
+        setStatus("status-database", false, "Not checked");
+        clearTimeout(noteTimer);
+        return;
+      }
+
+      try {
+        const db = await getJson("/health/db/");
+        setStatus("status-database", db.ok, db.ok ? "Connected" : "Unavailable");
+      } catch {
+        setStatus("status-database", false, "Unreachable");
+      }
+
+      clearTimeout(noteTimer);
+      wakeNote.classList.add("hidden");
+    }
+
+    checkSystem();
+  </script>
+</body>
+</html>

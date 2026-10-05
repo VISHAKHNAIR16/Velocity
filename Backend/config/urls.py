@@ -16,12 +16,12 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path
-from .views import health_check
+from .views import db_health_check, health_check
+
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path("api/v1/health/", health_check, name="health-check"),
-    # App routers get included here as we build them:
-    # path("api/v1/", include("apps.parties.urls")),
+    path("api/v1/health/db/", db_health_check, name="db-health-check"),
 
 ]
