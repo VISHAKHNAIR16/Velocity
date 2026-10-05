@@ -1,6 +1,6 @@
 """Admin configuration for the email-based User."""
-from django.contrib import admin
-from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
+from django.contrib import admin # pyright: ignore[reportMissingModuleSource]
+from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin # pyright: ignore[reportMissingModuleSource]
 
 from .models import User
 

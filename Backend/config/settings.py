@@ -8,8 +8,8 @@ import os
 from datetime import timedelta
 from pathlib import Path
 
-import dj_database_url
-from django.core.exceptions import ImproperlyConfigured
+import dj_database_url # pyright: ignore[reportMissingImports]
+from django.core.exceptions import ImproperlyConfigured # pyright: ignore[reportMissingModuleSource]
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent

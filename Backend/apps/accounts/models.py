@@ -1,6 +1,6 @@
 """Custom user model: log in with email instead of a username."""
-from django.contrib.auth.models import AbstractUser, BaseUserManager
-from django.db import models
+from django.contrib.auth.models import AbstractUser, BaseUserManager # pyright: ignore[reportMissingModuleSource]
+from django.db import models # pyright: ignore[reportMissingModuleSource]
 
 
 class UserManager(BaseUserManager):
