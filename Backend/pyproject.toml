@@ -20,3 +20,11 @@ dependencies = [
 dev = [
     "ruff>=0.16.10",
 ]
+
+[tool.ruff]
+line-length = 100
+extend-exclude = ["**/migrations/*"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]  # errors, unused code, import order, likely bugs, modern syntax
+ignore = ["E501"]                    # line length is handled by the formatter

@@ -1,4 +1,5 @@
 """Serializers: registration and business profile."""
+
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.db import transaction
@@ -52,14 +53,29 @@ class BusinessProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = BusinessProfile
         fields = [
-            "id", "trade_name", "company_name", "owner_name",
-            "phone", "alternate_phone", "email", "website",
-            "gstin", "pan",
-            "address_line", "city", "state_code", "pincode",
+            "id",
+            "trade_name",
+            "company_name",
+            "owner_name",
+            "phone",
+            "alternate_phone",
+            "email",
+            "website",
+            "gstin",
+            "pan",
+            "address_line",
+            "city",
+            "state_code",
+            "pincode",
             "logo",
-            "bank_account_name", "bank_account_number", "bank_ifsc",
-            "bank_name", "bank_branch",
-            "is_complete", "created_at", "updated_at",
+            "bank_account_name",
+            "bank_account_number",
+            "bank_ifsc",
+            "bank_name",
+            "bank_branch",
+            "is_complete",
+            "created_at",
+            "updated_at",
         ]
         read_only_fields = ["id", "logo", "created_at", "updated_at"]
 
@@ -95,6 +111,7 @@ class BusinessProfileSerializer(serializers.ModelSerializer):
         if errors:
             raise serializers.ValidationError(errors)
         return attrs
+
 
 class LogoUploadSerializer(serializers.Serializer):
     """Validates an uploaded logo: a real image, an allowed type, and a size limit."""

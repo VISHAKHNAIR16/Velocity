@@ -1,4 +1,5 @@
 """API views for authentication and the business profile."""
+
 from rest_framework import status
 from rest_framework.generics import RetrieveUpdateAPIView
 from rest_framework.parsers import MultiPartParser
@@ -10,17 +11,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from .constants import GST_STATE_CHOICES
 from .models import BusinessProfile
 from .serializers import BusinessProfileSerializer, LogoUploadSerializer, RegisterSerializer
-
-
-def get_business(user) -> BusinessProfile:
-    """
-    Return the user's business profile. Normally created at registration; this also
-    covers accounts made another way (e.g. createsuperuser) so they never hit an error.
-    """
-    profile, _ = BusinessProfile.objects.get_or_create(
-        user=user, defaults={"trade_name": user.email, "company_name": user.email, "email": user.email}
-    )
-    return profile
+from .services import get_business
 
 
 class RegisterView(APIView):

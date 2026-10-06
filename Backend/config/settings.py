@@ -4,12 +4,15 @@ Django settings for the Velocity GST Billing platform.
 All environment-specific values come from environment variables (.env locally,
 the Render dashboard in production). Nothing secret is hardcoded here.
 """
+
 import os
 from datetime import timedelta
 from pathlib import Path
 
-import dj_database_url # pyright: ignore[reportMissingImports]
-from django.core.exceptions import ImproperlyConfigured # pyright: ignore[reportMissingModuleSource]
+import dj_database_url  # pyright: ignore[reportMissingImports]
+from django.core.exceptions import (
+    ImproperlyConfigured,  # pyright: ignore[reportMissingModuleSource]
+)
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -64,8 +67,8 @@ INSTALLED_APPS = [
     "rest_framework",
     "corsheaders",
     # Local apps are added here as we build them (accounts, parties, ...)
-
     "apps.accounts",
+    "apps.core",
 ]
 
 MIDDLEWARE = [
@@ -111,7 +114,7 @@ TEMPLATES = [
 DATABASES = {
     "default": dj_database_url.config(
         default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}",
-        conn_max_age=60,          # reuse connections for 60s instead of reconnecting each request
+        conn_max_age=60,  # reuse connections for 60s instead of reconnecting each request
         conn_health_checks=True,  # drop dead connections instead of erroring
     )
 }
@@ -130,7 +133,7 @@ AUTH_PASSWORD_VALIDATORS = [
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "Asia/Kolkata"  # Invoice dates must follow Indian time
 USE_I18N = True
-USE_TZ = True               # Store UTC in the DB, convert on display
+USE_TZ = True  # Store UTC in the DB, convert on display
 
 AUTH_USER_MODEL = "accounts.User"  # must be set BEFORE the first migrate
 

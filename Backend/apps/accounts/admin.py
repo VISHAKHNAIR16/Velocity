@@ -1,9 +1,12 @@
 """Admin configuration for the email-based User."""
-from django.contrib import admin # pyright: ignore[reportMissingModuleSource]
-from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin # pyright: ignore[reportMissingModuleSource]
 
-from .models import User
+from django.contrib import admin  # pyright: ignore[reportMissingModuleSource]
+from django.contrib.auth.admin import (
+    UserAdmin as DjangoUserAdmin,  # pyright: ignore[reportMissingModuleSource]
+)
+
 from .models import BusinessProfile, User
+
 
 @admin.register(User)
 class UserAdmin(DjangoUserAdmin):
@@ -14,12 +17,14 @@ class UserAdmin(DjangoUserAdmin):
     fieldsets = (
         (None, {"fields": ("email", "password")}),
         ("Personal info", {"fields": ("first_name", "last_name")}),
-        ("Permissions", {"fields": ("is_active", "is_staff", "is_superuser", "groups", "user_permissions")}),
+        (
+            "Permissions",
+            {"fields": ("is_active", "is_staff", "is_superuser", "groups", "user_permissions")},
+        ),
         ("Important dates", {"fields": ("last_login", "date_joined")}),
     )
-    add_fieldsets = (
-        (None, {"classes": ("wide",), "fields": ("email", "password1", "password2")}),
-    )
+    add_fieldsets = ((None, {"classes": ("wide",), "fields": ("email", "password1", "password2")}),)
+
 
 @admin.register(BusinessProfile)
 class BusinessProfileAdmin(admin.ModelAdmin):

@@ -1,4 +1,5 @@
 """Turns every API error into one consistent JSON shape."""
+
 from rest_framework.exceptions import ValidationError
 from rest_framework.views import exception_handler
 

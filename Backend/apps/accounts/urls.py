@@ -1,9 +1,9 @@
 """URL routes for the accounts app (mounted under /api/v1/)."""
+
 from django.urls import path
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from .views import BusinessLogoView, BusinessProfileView, RegisterView, StateListView
-
 
 urlpatterns = [
     path("auth/register/", RegisterView.as_view(), name="register"),

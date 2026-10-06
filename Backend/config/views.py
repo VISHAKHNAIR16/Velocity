@@ -1,8 +1,9 @@
 """Project-wide utility views."""
+
 import logging
 
-from django.db import connection # pyright: ignore[reportMissingModuleSource]
-from django.http import JsonResponse # pyright: ignore[reportMissingModuleSource]
+from django.db import connection  # pyright: ignore[reportMissingModuleSource]
+from django.http import JsonResponse  # pyright: ignore[reportMissingModuleSource]
 
 logger = logging.getLogger(__name__)
 

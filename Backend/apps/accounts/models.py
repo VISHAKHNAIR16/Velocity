@@ -1,14 +1,17 @@
 """Custom user model: log in with email instead of a username."""
-from django.contrib.auth.models import AbstractUser, BaseUserManager # pyright: ignore[reportMissingModuleSource]
-from django.db import models # pyright: ignore[reportMissingModuleSource]
-
-from django.conf import settings
-from django.core.validators import RegexValidator
-
-from .constants import GST_STATE_CHOICES
 
 import os
 import uuid
+
+from django.conf import settings
+from django.contrib.auth.models import (  # pyright: ignore[reportMissingModuleSource]
+    AbstractUser,
+    BaseUserManager,
+)
+from django.core.validators import RegexValidator
+from django.db import models  # pyright: ignore[reportMissingModuleSource]
+
+from .constants import GST_STATE_CHOICES
 
 
 class UserManager(BaseUserManager):
@@ -62,6 +65,7 @@ def logo_upload_path(instance: "BusinessProfile", filename: str) -> str:
     extension = os.path.splitext(filename)[1].lower()
     return f"business_logos/{instance.pk}/{uuid.uuid4().hex}{extension}"
 
+
 # ---------------------------------------------------------------------------
 # Format validators (reused by the API because ModelSerializer applies them)
 # ---------------------------------------------------------------------------
@@ -69,12 +73,18 @@ gstin_validator = RegexValidator(
     r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$",
     "Enter a valid 15-character GSTIN, e.g. 36ABCCS2942R1ZR.",
 )
-pan_validator = RegexValidator(r"^[A-Z]{5}[0-9]{4}[A-Z]$", "Enter a valid 10-character PAN, e.g. ABCCS2942R.")
+pan_validator = RegexValidator(
+    r"^[A-Z]{5}[0-9]{4}[A-Z]$", "Enter a valid 10-character PAN, e.g. ABCCS2942R."
+)
 ifsc_validator = RegexValidator(r"^[A-Z]{4}0[A-Z0-9]{6}$", "Enter a valid 11-character IFSC code.")
 pincode_validator = RegexValidator(r"^[1-9][0-9]{5}$", "Enter a valid 6-digit pincode.")
-mobile_validator = RegexValidator(r"^[6-9][0-9]{9}$", "Enter a valid 10-digit Indian mobile number.")
+mobile_validator = RegexValidator(
+    r"^[6-9][0-9]{9}$", "Enter a valid 10-digit Indian mobile number."
+)
 phone_validator = RegexValidator(r"^[0-9]{6,15}$", "Enter digits only (6 to 15 digits).")
-account_number_validator = RegexValidator(r"^[0-9]{9,18}$", "Account number must be 9 to 18 digits.")
+account_number_validator = RegexValidator(
+    r"^[0-9]{9,18}$", "Account number must be 9 to 18 digits."
+)
 
 
 class BusinessProfile(models.Model):
@@ -113,8 +123,12 @@ class BusinessProfile(models.Model):
 
     # --- Bank details (printed on invoices) ---
     bank_account_name = models.CharField(max_length=150, blank=True)
-    bank_account_number = models.CharField(max_length=18, blank=True, validators=[account_number_validator])
-    bank_ifsc = models.CharField("IFSC code", max_length=11, blank=True, validators=[ifsc_validator])
+    bank_account_number = models.CharField(
+        max_length=18, blank=True, validators=[account_number_validator]
+    )
+    bank_ifsc = models.CharField(
+        "IFSC code", max_length=11, blank=True, validators=[ifsc_validator]
+    )
     bank_name = models.CharField(max_length=100, blank=True)
     bank_branch = models.CharField(max_length=100, blank=True)
 
