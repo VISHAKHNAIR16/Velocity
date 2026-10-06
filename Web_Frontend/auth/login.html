@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Log in | Velocity</title>
+  <link rel="stylesheet" href="/shared/css/theme.css" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/shared/js/tailwind-config.js"></script>
+</head>
+<body class="min-h-screen bg-navy">
+  <main class="mx-auto max-w-md px-4 py-16">
+    <a href="/" class="text-2xl font-bold text-white">Velocity</a>
+    <div class="speed-bar mt-2 w-16 rounded"></div>
+    <h1 class="mt-6 text-xl font-semibold text-white">Log in to your account</h1>
+
+    <form id="login-form" class="card mt-5 space-y-4" novalidate>
+      <p data-form-message class="hidden"></p>
+
+      <div>
+        <label for="email" class="label">Email</label>
+        <input id="email" name="email" type="email" autocomplete="email" required class="input" />
+        <p data-error-for="email" class="field-error"></p>
+      </div>
+
+      <div>
+        <label for="password" class="label">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required class="input" />
+        <p data-error-for="password" class="field-error"></p>
+      </div>
+
+      <button type="submit" class="btn btn-primary w-full">Log in</button>
+    </form>
+
+    <p class="mt-4 text-sm text-white/70">New here?
+      <a href="/auth/register.html" class="text-glow underline">Create an account</a>
+    </p>
+  </main>
+
+  <script src="/shared/js/config.js"></script>
+  <script src="/shared/js/api.js"></script>
+  <script src="/shared/js/ui.js"></script>
+  <script src="/auth/login.js"></script>
+</body>
+</html>

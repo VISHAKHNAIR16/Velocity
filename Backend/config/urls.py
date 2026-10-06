@@ -15,13 +15,19 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
-from django.urls import path
+from django.urls import path , include
 from .views import db_health_check, health_check
+from django.conf import settings
+from django.conf.urls.static import static
 
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path("api/v1/health/", health_check, name="health-check"),
     path("api/v1/health/db/", db_health_check, name="db-health-check"),
-
+    path("api/v1/", include("apps.accounts.urls")),
 ]
+
+# Development only: serve locally uploaded files when Cloudinary isn't configured.
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

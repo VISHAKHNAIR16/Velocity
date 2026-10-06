@@ -1,8 +1,9 @@
 # Done By Me 
 
-/Client_Suggestions
 gst_billing_app_specification.md
 tasks.md
+TECH.md
+Docs/
 
 # --- Secrets (NEVER commit) ---
 .env

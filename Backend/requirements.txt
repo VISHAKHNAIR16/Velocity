@@ -35,6 +35,8 @@ gunicorn==26.2.0
     # via velocity
 idna==3.20
     # via requests
+pillow==12.3.0
+    # via velocity
 psycopg==3.3.6
     # via velocity
 psycopg-binary==3.3.6 ; implementation_name != 'pypy'

@@ -3,7 +3,7 @@ from django.contrib import admin # pyright: ignore[reportMissingModuleSource]
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin # pyright: ignore[reportMissingModuleSource]
 
 from .models import User
-
+from .models import BusinessProfile, User
 
 @admin.register(User)
 class UserAdmin(DjangoUserAdmin):
@@ -20,3 +20,8 @@ class UserAdmin(DjangoUserAdmin):
     add_fieldsets = (
         (None, {"classes": ("wide",), "fields": ("email", "password1", "password2")}),
     )
+
+@admin.register(BusinessProfile)
+class BusinessProfileAdmin(admin.ModelAdmin):
+    list_display = ("trade_name", "user", "gstin", "state_code", "created_at")
+    search_fields = ("trade_name", "company_name", "gstin", "user__email")

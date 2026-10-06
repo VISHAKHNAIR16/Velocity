@@ -173,6 +173,7 @@ REST_FRAMEWORK = {
     # JSON only, with no browsable HTML API. Matches the API-first rule.
     "DEFAULT_RENDERER_CLASSES": ("rest_framework.renderers.JSONRenderer",),
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "EXCEPTION_HANDLER": "config.exceptions.api_exception_handler",
     "PAGE_SIZE": 20,
 }
 

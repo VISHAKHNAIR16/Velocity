@@ -1,0 +1,65 @@
+/* Velocity theme: palette variables and reusable component styles. */
+:root {
+  --navy: #334155;       /* dark slate text — soft, not black */
+  --brand: #3B82F6;      /* friendly light blue */
+  --velocity: #22D3EE;   /* bright cyan */
+  --glow: #7DD3FC;       /* soft sky glow */
+  --muted: #94A3B8;      /* light gray for hints */
+  --page: #FFFFFF;       /* pure white page */
+  --line: #E2E8F0;       /* soft light border */
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: var(--navy);
+  background: var(--page);
+}
+
+/* The "speed slash": a thin gradient bar used under the nav and by the logo. */
+.speed-bar {
+  height: 3px;
+  background: linear-gradient(90deg, var(--brand), var(--velocity), var(--glow));
+}
+
+.card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  padding: 1.5rem;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04), 0 4px 12px rgba(15, 23, 42, 0.04);
+}
+
+.label { display: block; font-size: 0.875rem; font-weight: 500; color: var(--navy); }
+
+.input {
+  margin-top: 0.25rem;
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: #fff;
+  color: var(--navy);
+}
+.input::placeholder { color: var(--muted); }
+.input:focus { outline: 2px solid var(--glow); border-color: var(--brand); }
+
+.btn {
+  display: inline-block;
+  text-align: center;
+  border-radius: 0.5rem;
+  padding: 0.5rem 1.25rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-primary { background: var(--brand); color: #fff; border: 1px solid var(--brand); }
+.btn-primary:hover:not(:disabled) { opacity: 0.9; }
+.btn-outline { background: #fff; color: var(--brand); border: 1px solid var(--brand); }
+.btn-outline:hover:not(:disabled) { background: #EFF6FF; }
+
+.hint { margin-top: 0.25rem; font-size: 0.75rem; color: var(--muted); }
+.field-error { margin-top: 0.25rem; font-size: 0.875rem; color: #DC2626; }
+.link { color: var(--brand); text-decoration: underline; }
