@@ -11,7 +11,7 @@ User = get_user_model()
 STRONG_PASSWORD = "Str0ng!Pass#2026"
 
 
-def make_user(email: str, trade_name: str) -> "User":
+def make_user(email: str, trade_name: str) -> "User": # type: ignore
     """Create a user together with their business profile."""
     user = User.objects.create_user(email=email, password=STRONG_PASSWORD)
     BusinessProfile.objects.create(user=user, trade_name=trade_name, company_name=trade_name)

@@ -69,6 +69,8 @@ INSTALLED_APPS = [
     # Local apps are added here as we build them (accounts, parties, ...)
     "apps.accounts",
     "apps.core",
+    "apps.parties",
+    "apps.inventory",
 ]
 
 MIDDLEWARE = [

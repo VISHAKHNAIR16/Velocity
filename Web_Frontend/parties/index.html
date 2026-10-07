@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Parties | Velocity</title>
+  <link rel="stylesheet" href="/shared/css/theme.css" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/shared/js/tailwind-config.js"></script>
+</head>
+<body class="min-h-screen bg-page">
+  <header id="nav" class="bg-navy"></header>
+
+  <main class="mx-auto max-w-7xl px-4 py-8">
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-8">
+      <div>
+        <h1 class="text-2xl font-bold text-navy">Parties</h1>
+        <p class="mt-1 text-sm text-muted">Manage your customers and suppliers</p>
+      </div>
+      <button id="add-party-btn" type="button" class="btn btn-primary w-full sm:w-auto">
+        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        Add Party
+      </button>
+    </div>
+
+    <!-- Filters Bar -->
+    <div class="card mb-6 p-4">
+      <div class="flex flex-col sm:flex-row gap-4">
+        <!-- Type Filter -->
+        <div class="flex-1 sm:w-48">
+          <label class="label" for="type-filter">Filter by Type</label>
+          <select id="type-filter" class="input mt-1" aria-label="Filter by party type">
+            <option value="">All Types</option>
+            <option value="CUSTOMER">Customers</option>
+            <option value="SUPPLIER">Suppliers</option>
+            <option value="BOTH">Both</option>
+          </select>
+        </div>
+
+        <!-- Search -->
+        <div class="flex-1 min-w-[200px]">
+          <label class="label" for="search-input">Search</label>
+          <div class="relative mt-1">
+            <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+            <input id="search-input" type="search" class="input pl-10 pr-10" placeholder="Search name, mobile, GSTIN..." aria-label="Search parties" autocomplete="off" />
+            <button id="search-clear" type="button" class="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-navy hidden" aria-label="Clear search">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Status Filter -->
+        <div class="flex-1 sm:w-48">
+          <label class="label" for="status-filter">Status</label>
+          <select id="status-filter" class="input mt-1" aria-label="Filter by status">
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </select>
+        </div>
+
+        <!-- Sort -->
+        <div class="flex-1 sm:w-48">
+          <label class="label" for="sort-select">Sort By</label>
+          <select id="sort-select" class="input mt-1" aria-label="Sort parties">
+            <option value="name">Name A–Z</option>
+            <option value="-name">Name Z–A</option>
+            <option value="-created_at">Newest First</option>
+            <option value="created_at">Oldest First</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Active Filters Chips -->
+      <div id="active-filters" class="mt-3 flex flex-wrap gap-2 hidden" aria-label="Active filters"></div>
+    </div>
+
+    <!-- Table Card -->
+    <section class="card" id="table-card">
+      <div class="overflow-x-auto" id="table-wrap">
+        <table class="w-full min-w-[800px]" role="grid">
+          <thead>
+            <tr class="border-b border-line">
+              <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">Party</th>
+              <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider hidden sm:table-cell">Type</th>
+              <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider hidden md:table-cell">Mobile</th>
+              <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider hidden lg:table-cell">GSTIN</th>
+              <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider hidden lg:table-cell">State</th>
+              <th scope="col" class="px-4 py-3 text-right text-xs font-semibold text-muted uppercase tracking-wider">Opening Balance</th>
+              <th scope="col" class="px-4 py-3 text-right text-xs font-semibold text-muted uppercase tracking-wider w-[80px]"><span class="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody id="parties-tbody" class="divide-y divide-line-soft">
+            <!-- Rows inserted here -->
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Empty State -->
+      <div id="empty-state" class="hidden py-12 px-4 text-center">
+        <div class="mx-auto w-16 h-16 rounded-full bg-tint flex items-center justify-center mb-4">
+          <svg class="w-8 h-8 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+        </div>
+        <h3 id="empty-title" class="text-lg font-medium text-navy mb-1">No parties yet</h3>
+        <p id="empty-text" class="text-sm text-muted mb-4">Get started by adding your first customer or supplier.</p>
+        <button id="empty-action" type="button" class="btn btn-primary hidden">Add Party</button>
+      </div>
+
+      <!-- Loading State -->
+      <div id="loading-state" class="hidden py-12 px-4">
+        <div class="space-y-3">
+          <div class="h-12 bg-tint rounded animate-pulse"></div>
+          <div class="h-12 bg-tint rounded animate-pulse"></div>
+          <div class="h-12 bg-tint rounded animate-pulse"></div>
+          <div class="h-12 bg-tint rounded animate-pulse"></div>
+          <div class="h-12 bg-tint rounded animate-pulse"></div>
+        </div>
+      </div>
+
+      <!-- Error State -->
+      <div id="error-state" class="hidden py-12 px-4 text-center">
+        <div class="mx-auto w-12 h-12 rounded-full bg-danger-soft flex items-center justify-center mb-3">
+          <svg class="w-6 h-6 text-danger" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+        </div>
+        <h3 class="text-lg font-medium text-navy mb-1">Unable to load parties</h3>
+        <p id="error-text" class="text-sm text-muted mb-4">Something went wrong. Please try again.</p>
+        <button id="retry-btn" type="button" class="btn btn-primary">Try Again</button>
+      </div>
+
+      <!-- Pagination -->
+      <div id="pagination" class="hidden px-4 py-3 border-t border-line flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <p id="pagination-info" class="text-sm text-muted">Showing <span id="showing-from">0</span>–<span id="showing-to">0</span> of <span id="total-count">0</span> parties</p>
+        <div id="pagination-controls" class="flex items-center gap-2"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Add / Edit Drawer -->
+  <div id="drawer" class="fixed inset-0 z-50 hidden" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+    <div class="drawer-backdrop fixed inset-0 bg-navy/30" data-close></div>
+    <div class="drawer-panel fixed inset-y-0 right-0 w-full max-w-lg bg-surface shadow-xl flex flex-col transform transition-transform duration-200 ease-out" style="transform: translateX(100%);">
+      <!-- Header -->
+      <header class="flex items-start justify-between gap-4 p-4 border-b border-line flex-shrink-0">
+        <div>
+          <h2 id="drawer-title" class="text-lg font-semibold text-navy">Add Party</h2>
+          <p id="drawer-subtitle" class="text-sm text-muted mt-0.5">Fields marked <span class="text-danger">*</span> are required.</p>
+        </div>
+        <button type="button" class="icon-btn p-1 rounded-lg text-muted hover:text-navy hover:bg-tint" data-close aria-label="Close drawer">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </header>
+
+      <!-- Form -->
+      <form id="party-form" class="flex-1 overflow-y-auto p-4 space-y-6" novalidate>
+        <p id="form-message" data-form-message class="hidden rounded-lg p-3 text-sm"></p>
+
+        <!-- Basic Details -->
+        <section>
+          <h3 class="text-xs font-semibold text-muted uppercase tracking-wider mb-4">Basic Details</h3>
+          <div class="space-y-4">
+            <div class="grid sm:grid-cols-2 gap-4">
+              <div class="sm:col-span-2">
+                <label for="f-name" class="label">Party Name <span class="text-danger">*</span></label>
+                <input id="f-name" name="name" type="text" maxlength="200" autocomplete="off" class="input" required />
+                <p data-error-for="name" class="field-error"></p>
+              </div>
+              <div>
+                <label for="f-party_type" class="label">Party Type <span class="text-danger">*</span></label>
+                <select id="f-party_type" name="party_type" class="input" required>
+                  <option value="CUSTOMER">Customer</option>
+                  <option value="SUPPLIER">Supplier</option>
+                  <option value="BOTH">Both</option>
+                </select>
+                <p data-error-for="party_type" class="field-error"></p>
+              </div>
+              <div>
+                <label for="f-mobile" class="label">Mobile <span class="text-danger">*</span></label>
+                <input id="f-mobile" name="mobile" type="tel" inputmode="numeric" maxlength="10" data-digits autocomplete="off" class="input" placeholder="9876543210" required />
+                <p data-error-for="mobile" class="field-error"></p>
+              </div>
+              <div class="sm:col-span-2">
+                <label for="f-email" class="label">Email</label>
+                <input id="f-email" name="email" type="email" autocomplete="email" class="input" placeholder="accounts@example.com" />
+                <p data-error-for="email" class="field-error"></p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div class="border-t border-line pt-6"></div>
+
+        <!-- Tax Details -->
+        <section>
+          <h3 class="text-xs font-semibold text-muted uppercase tracking-wider mb-4">Tax Details</h3>
+          <div class="space-y-4">
+            <div class="grid sm:grid-cols-2 gap-4">
+              <div>
+                <label for="f-gstin" class="label">GSTIN</label>
+                <input id="f-gstin" name="gstin" type="text" maxlength="15" autocapitalize="characters" spellcheck="false" autocomplete="off" class="input input-upper" placeholder="36ABCCS2942R1ZR" />
+                <p class="hint">Leave blank for unregistered parties.</p>
+                <p data-error-for="gstin" class="field-error"></p>
+              </div>
+              <div>
+                <label for="f-pan" class="label">PAN</label>
+                <input id="f-pan" name="pan" type="text" maxlength="10" autocapitalize="characters" spellcheck="false" autocomplete="off" class="input input-upper" placeholder="ABCCS2942R" />
+                <p class="hint">Auto-filled from GSTIN.</p>
+                <p data-error-for="pan" class="field-error"></p>
+              </div>
+              <div class="sm:col-span-2">
+                <label for="f-state_code" class="label">State <span class="text-danger">*</span></label>
+                <select id="f-state_code" name="state_code" class="input" required>
+                  <option value="">Select state</option>
+                </select>
+                <p class="hint">Determines CGST+SGST vs IGST on invoices.</p>
+                <p data-error-for="state_code" class="field-error"></p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div class="border-t border-line pt-6"></div>
+
+        <!-- Billing Address -->
+        <section>
+          <h3 class="text-xs font-semibold text-muted uppercase tracking-wider mb-4">Billing Address</h3>
+          <div class="space-y-4">
+            <div class="grid sm:grid-cols-2 gap-4">
+              <div class="sm:col-span-2">
+                <label for="f-billing_address" class="label">Address</label>
+                <textarea id="f-billing_address" name="billing_address" rows="2" class="input" placeholder="Building, street, area"></textarea>
+                <p data-error-for="billing_address" class="field-error"></p>
+              </div>
+              <div>
+                <label for="f-billing_city" class="label">City</label>
+                <input id="f-billing_city" name="billing_city" type="text" maxlength="100" class="input" />
+                <p data-error-for="billing_city" class="field-error"></p>
+              </div>
+              <div>
+                <label for="f-billing_pincode" class="label">Pincode</label>
+                <input id="f-billing_pincode" name="billing_pincode" type="text" inputmode="numeric" maxlength="6" data-digits class="input" />
+                <p data-error-for="billing_pincode" class="field-error"></p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div class="border-t border-line pt-6"></div>
+
+        <!-- Shipping Address -->
+        <section>
+          <h3 class="text-xs font-semibold text-muted uppercase tracking-wider mb-4">Shipping Address</h3>
+          <label class="flex items-center gap-2 text-sm cursor-pointer mb-4">
+            <input type="checkbox" id="f-same_as_billing" name="same_as_billing" class="checkbox w-4 h-4" checked />
+            <span class="text-navy">Same as billing address</span>
+          </label>
+          <div id="shipping-fields" class="space-y-4 hidden">
+            <div class="grid sm:grid-cols-2 gap-4">
+              <div class="sm:col-span-2">
+                <label for="f-shipping_address" class="label">Address</label>
+                <textarea id="f-shipping_address" name="shipping_address" rows="2" class="input" placeholder="Building, street, area"></textarea>
+                <p data-error-for="shipping_address" class="field-error"></p>
+              </div>
+              <div>
+                <label for="f-shipping_city" class="label">City</label>
+                <input id="f-shipping_city" name="shipping_city" type="text" maxlength="100" class="input" />
+                <p data-error-for="shipping_city" class="field-error"></p>
+              </div>
+              <div>
+                <label for="f-shipping_pincode" class="label">Pincode</label>
+                <input id="f-shipping_pincode" name="shipping_pincode" type="text" inputmode="numeric" maxlength="6" data-digits class="input" />
+                <p data-error-for="shipping_pincode" class="field-error"></p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div class="border-t border-line pt-6"></div>
+
+        <!-- Opening Balance -->
+        <section>
+          <h3 class="text-xs font-semibold text-muted uppercase tracking-wider mb-4">Opening Balance</h3>
+          <div class="grid sm:grid-cols-2 gap-4">
+            <div>
+              <label for="f-opening_balance" class="label">Amount</label>
+              <div class="input-affix">
+                <span class="affix">₹</span>
+                <input id="f-opening_balance" name="opening_balance" type="text" inputmode="decimal" data-decimal autocomplete="off" class="input" placeholder="0.00" />
+              </div>
+              <p data-error-for="opening_balance" class="field-error"></p>
+            </div>
+            <div>
+              <label for="f-balance_type" class="label">Direction</label>
+              <select id="f-balance_type" name="balance_type" class="input">
+                <option value="CREDIT">Party owes us (To Collect)</option>
+                <option value="DEBIT">We owe party (To Pay)</option>
+              </select>
+              <p data-error-for="balance_type" class="field-error"></p>
+            </div>
+          </div>
+        </section>
+      </form>
+
+      <!-- Footer -->
+      <footer class="flex justify-end gap-3 p-4 border-t border-line flex-shrink-0 bg-tint/50">
+        <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+        <button type="submit" form="party-form" id="submit-btn" class="btn btn-primary">Add Party</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- Delete Confirmation Dialog -->
+  <div id="confirm-dialog" class="fixed inset-0 z-50 hidden" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title">
+    <div class="fixed inset-0 bg-navy/30" id="confirm-backdrop"></div>
+    <div class="fixed inset-0 flex items-center justify-center p-4">
+      <div class="bg-surface rounded-xl shadow-xl max-w-md w-full p-6 transform transition-all">
+        <h3 id="confirm-title" class="text-lg font-semibold text-navy mb-2">Delete Party?</h3>
+        <p id="confirm-text" class="text-sm text-muted mb-6"></p>
+        <div class="flex justify-end gap-3">
+          <button type="button" id="confirm-cancel" class="btn btn-ghost">Cancel</button>
+          <button type="button" id="confirm-ok" class="btn btn-danger">Delete</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/shared/js/config.js"></script>
+  <script src="/shared/js/api.js"></script>
+  <script src="/shared/js/ui.js"></script>
+  <script src="/parties/parties.js"></script>
+</body>
+</html>
