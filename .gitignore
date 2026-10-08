@@ -1,7 +1,6 @@
 # Done By Me 
 
 gst_billing_app_specification.md
-tasks.md
 TECH.md
 Docs/
 
@@ -10,6 +9,7 @@ Docs/
 .env.*
 .env.example
 Backend\.env.example
+session-ses_eea3.md
 
 
 # --- Django ---
