@@ -39,6 +39,7 @@ class PartySerializer(serializers.ModelSerializer):
             "shipping_address",
             "shipping_city",
             "shipping_pincode",
+            "shipping_state_code",
             "opening_balance",
             "balance_type",
             "is_active",
@@ -148,6 +149,29 @@ class PartySerializer(serializers.ModelSerializer):
                 {"state_code": "Select the party's state."}
             )
         attrs["state_code"] = resolved_state
+
+        # A shipping state only makes sense alongside a shipping address. Without
+        # this check a stray shipping_state_code would silently change place of
+        # supply on an invoice while the address still shows the billing state.
+        shipping_state = attrs.get("shipping_state_code") or (
+            self.instance.shipping_state_code if self.instance else ""
+        )
+        shipping_address = attrs.get("shipping_address", None)
+        if shipping_address is None and self.instance:
+            shipping_address = self.instance.shipping_address
+        has_shipping_address = bool((shipping_address or "").strip())
+        if shipping_state and not has_shipping_address:
+            raise serializers.ValidationError(
+                {
+                    "shipping_state_code": (
+                        "Enter a shipping address, or clear the shipping state "
+                        "to ship to the billing state."
+                    )
+                }
+            )
+        if has_shipping_address and not shipping_state:
+            # Blank means "same as billing", which is the intended default.
+            attrs["shipping_state_code"] = ""
 
         # If GSTIN provided but PAN not, auto-fill from GSTIN
         if gstin and "pan" not in attrs:

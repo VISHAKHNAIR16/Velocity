@@ -6,6 +6,7 @@ from django.db import transaction
 from rest_framework import serializers
 
 from .models import BusinessProfile
+from .services import get_or_create_walk_in_party
 
 User = get_user_model()
 
@@ -32,12 +33,16 @@ class RegisterSerializer(serializers.Serializer):
         user = User.objects.create_user(
             email=validated_data["email"], password=validated_data["password"]
         )
-        BusinessProfile.objects.create(
+        business = BusinessProfile.objects.create(
             user=user,
             trade_name=validated_data["trade_name"],
             company_name=validated_data["trade_name"],  # user can change it on the profile page
             email=user.email,
         )
+        # Cash-sale customer, created up front so the billing form always has a
+        # usable counter party. Its state is filled in once the business sets one
+        # (a brand-new profile has no state yet).
+        get_or_create_walk_in_party(business)
         return user
 
 
@@ -73,6 +78,10 @@ class BusinessProfileSerializer(serializers.ModelSerializer):
             "bank_ifsc",
             "bank_name",
             "bank_branch",
+            "gst_registration_type",
+            "round_invoice_total",
+            "invoice_number_prefix",
+            "hsn_requirement",
             "is_complete",
             "created_at",
             "updated_at",
@@ -91,7 +100,17 @@ class BusinessProfileSerializer(serializers.ModelSerializer):
         website = data.get("website")
         if isinstance(website, str) and website.strip() and "://" not in website:
             data["website"] = "https://" + website.strip()
+        prefix = data.get("invoice_number_prefix")
+        if isinstance(prefix, str):
+            data["invoice_number_prefix"] = prefix.strip().upper()
         return super().to_internal_value(data)
+
+    def validate_invoice_number_prefix(self, value: str) -> str:
+        """Trim and uppercase, then let the regex report anything unusable."""
+        value = (value or "").strip().upper()
+        if not value:
+            raise serializers.ValidationError("Enter an invoice prefix, e.g. INV.")
+        return value
 
     def validate(self, attrs: dict) -> dict:
         """Cross-field check: a GSTIN embeds the state code and the PAN."""

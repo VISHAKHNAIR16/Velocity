@@ -1,7 +1,7 @@
 """Views for the Parties app."""
 
 from django.db.models import Q
-from rest_framework import filters
+from rest_framework import filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
@@ -74,10 +74,40 @@ class PartyViewSet(TenantModelViewSet):
     def restore(self, request, pk=None):
         """Restore a soft-deleted party: POST /api/v1/parties/{id}/restore/"""
         party = self.get_object()
+        if party.is_active:
+            return Response(self.get_serializer(party).data)
+
+        # The unique constraints only cover ACTIVE rows, so a GSTIN/PAN freed by
+        # a soft delete may since have been taken by someone else. Detect that
+        # here and explain it, instead of letting the database raise an
+        # IntegrityError (which would surface as a 500).
+        conflicts = []
+        for field, label in (("gstin", "GSTIN"), ("pan", "PAN")):
+            value = getattr(party, field)
+            if not value:
+                continue
+            taken = Party.objects.filter(
+                business=party.business, **{field: value}, is_active=True
+            ).exclude(pk=party.pk)
+            if taken.exists():
+                conflicts.append(label)
+        if conflicts:
+            return Response(
+                {
+                    "success": False,
+                    "error": "DUPLICATE_IDENTIFIER",
+                    "message": (
+                        f"Cannot restore: another active party in your business already "
+                        f"uses this {' and '.join(conflicts)}."
+                    ),
+                    "errors": {},
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         party.is_active = True
         party.save(update_fields=["is_active", "updated_at"])
-        serializer = self.get_serializer(party)
-        return Response(serializer.data)
+        return Response(self.get_serializer(party).data)
 
     @action(detail=False, methods=["get"])
     def search(self, request):

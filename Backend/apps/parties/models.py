@@ -78,6 +78,17 @@ class Party(TenantModel):
     shipping_pincode = models.CharField(
         max_length=6, blank=True, validators=[pincode_validator]
     )
+    shipping_state_code = models.CharField(
+        max_length=2,
+        blank=True,
+        choices=GST_STATE_CHOICES,
+        help_text=(
+            "Set only when goods are shipped to a different state from the billing "
+            "address. It decides place of supply for goods on an invoice "
+            "(intra-state CGST+SGST vs inter-state IGST). Leave blank to ship "
+            "to the billing state."
+        ),
+    )
 
     # --- Opening Balance (for ledger carry-forward) ---
     opening_balance = models.DecimalField(
@@ -110,14 +121,18 @@ class Party(TenantModel):
             models.Index(fields=["business", "mobile"]),
         ]
         constraints = [
+            # Conditional on both a non-blank value AND still being active, so a
+            # soft-deleted party's GSTIN/PAN can be reused while the row is kept
+            # for historic invoices. (Relaxing only - this cannot break existing
+            # rows, since the old constraint applied to every row.)
             models.UniqueConstraint(
                 fields=["business", "gstin"],
-                condition=models.Q(gstin__gt=""),
+                condition=models.Q(gstin__gt="", is_active=True),
                 name="unique_gstin_per_business",
             ),
             models.UniqueConstraint(
                 fields=["business", "pan"],
-                condition=models.Q(pan__gt=""),
+                condition=models.Q(pan__gt="", is_active=True),
                 name="unique_pan_per_business",
             ),
         ]

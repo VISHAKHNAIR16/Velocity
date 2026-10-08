@@ -177,5 +177,56 @@ Split into *do before launch* and *someday*.
       business profile → create party → create item → create invoice.
 - [ ] **Rounding tests for the GST calculator** once Phase 1.4 lands: amounts that produce
       fractions of a paisa, and a check that the JS preview matches the Python total to the paisa.
+      *(Partly covered by 1.4.2's golden + invariant tests; this entry stays for the extra
+      fractional-paisa cases added later.)*
+
+---
+
+## 11. Phase 1.4 Review — invoicing engine (added after the 1.4 plan was locked)
+
+Surfaced while designing the GST engine and **deliberately deferred**, so nothing here blocks 1.4.
+
+### 11a. Invoice features deferred out of 1.4
+
+- [ ] **Credit / debit notes.** Currently the only correction route after issue is cancel-and-reissue,
+      which is wrong once the period's GSTR-1 is filed. Needs its own numbering series, and for
+      `CANCELLED` invoices a reference to the original.
+- [ ] **Reverse charge.** No field in 1.4 by design. When added it needs precise semantics: tax
+      computed and shown but **excluded from the payable total**, plus the mandated declaration text.
+      A `default=False` column is safe for every existing invoice.
+- [ ] **Nil-rated vs exempt as separate rates.** `GST_RATE_CHOICES` currently has a single `0.00`
+      covering both, but GSTR-1 reports them in **different tables**. Splitting it later is a
+      migration plus a change to the calculator's registration gate.
+- [ ] **Compensation cess** on luxury/demerit goods — no cess column exists, so no 1.4 invoice can
+      carry one. Confirm no user needs it (see 1.4.8 compliance Q8).
+- [ ] **Turnover-based HSN thresholds.** The `HSN_REQUIRED` gate is unconditional, which is stricter
+      than the statutory ₹5,000-per-invoice B2B threshold. Make the threshold a business setting.
+- [ ] **SEZ / OIDAR (state codes 96/97).** Explicitly rejected for now; they need a separate
+      "zero-rated supply" concept rather than a rate of zero.
+- [ ] **One POS per invoice only.** A single invoice mixing goods delivered to two states is
+      currently impossible by design (decision 4). If real customers hit it, it becomes two invoices.
+- [ ] **Save a free-text line as an inventory item** — the billing form's "+ Custom line" has no
+      "also create this item" action.
+- [ ] **Staff logins per business.** `BusinessProfile.user` is still `OneToOne`, so one person per
+      business. 1.4 adds nullable `created_by` / `issued_by` / `cancelled_by` so the audit trail
+      survives the later migration, but real staff access still needs a many-to-one membership model.
+- [ ] **Invoice amendment trail** — who edited a draft, and when. Drafts are editable, so there is
+      currently no history of a draft's changes.
+
+### 11b. Invoicing infrastructure deferred
+
+- [ ] **Per-business invoice series across FYs** — a run of numbers with no gap (e.g. a destroyed
+      book), required for some audits. `InvoiceCounter` supports the FY reset but not series runs.
+- [ ] **Invoice numbering configurable without an FY segment** for shops that do not use it.
+- [ ] **Bulk invoice actions** — download a range as a PDF pack, or email a batch.
+- [ ] **Duplicate-invoice detection** — warn (do not block) when an identical party + amount + date
+      is issued twice, which is usually a double-click or a re-save.
+- [ ] **Recurring / scheduled invoices** for rent, subscriptions and retainers.
+- [ ] **Invoice hold / approval flow** — a second person approves before issue, for larger businesses.
+- [ ] **`assertNumQueries` on the invoice list** once invoices exist in volume, plus verifying the
+      `(business, invoice_date)` / `(business, status)` / `(business, party)` indexes are actually
+      used by the filters rather than sitting unused.
+- [ ] **Partition or archive issued invoices by financial year** if a single tenant's invoice count
+      grows large enough that list queries slow down.
 
 ---

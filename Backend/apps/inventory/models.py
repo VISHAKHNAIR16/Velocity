@@ -1,5 +1,9 @@
 """Item (Product & Service) models for the GST Billing platform."""
 
+from __future__ import annotations
+
+import os
+import uuid
 from decimal import Decimal
 
 from django.core.validators import MinValueValidator
@@ -14,6 +18,18 @@ from apps.core.constants import (
     SERVICE_DESCRIPTION_MAX_LENGTH,
 )
 from apps.core.models import TenantModel, TenantQuerySet
+
+
+def item_image_upload_path(instance: Item, filename: str) -> str:
+    """
+    Store item photos as item_images/<business id>/<random>.<ext>.
+
+    Uses a random name like the business logo does, so a long or odd user
+    filename cannot break the path or clash. On Cloudinary the path segment is
+    only a folder hint.
+    """
+    extension = os.path.splitext(filename)[1].lower() or ".jpg"
+    return f"item_images/{instance.pk}/{uuid.uuid4().hex}{extension}"
 
 
 class ItemQuerySet(TenantQuerySet):
@@ -154,6 +170,17 @@ class Item(TenantModel):
         default=True,
         db_index=True,
         help_text="Soft delete flag. Inactive items are hidden from pickers but preserved for historic invoices.",
+    )
+
+    # --- Photo (optional; shown on the catalogue and invoice PDFs) ---
+    # Left read-only in the API and set through a dedicated upload endpoint, so
+    # image validation (format + size) happens in one place instead of on every
+    # item write. Deleting the file is NOT tied to is_active: an invoice reprint
+    # must still be able to render the photo of a soft-deleted item.
+    image = models.ImageField(
+        upload_to=item_image_upload_path,
+        blank=True,
+        help_text="Optional product photo. Shown on the catalogue and on invoice PDFs.",
     )
 
     objects = ItemQuerySet.as_manager()

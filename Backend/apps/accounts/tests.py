@@ -1,11 +1,14 @@
 """Tests: authentication, business profile, and tenant isolation of the profile API."""
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 from rest_framework.test import APITestCase
 
+from apps.parties.models import Party
+
 from .models import BusinessProfile
-from .services import get_business
+from .services import WALK_IN_PARTY_NAME, get_business, get_or_create_walk_in_party
 
 User = get_user_model()
 STRONG_PASSWORD = "Str0ng!Pass#2026"
@@ -16,6 +19,11 @@ def make_user(email: str, trade_name: str) -> "User": # type: ignore
     user = User.objects.create_user(email=email, password=STRONG_PASSWORD)
     BusinessProfile.objects.create(user=user, trade_name=trade_name, company_name=trade_name)
     return user
+
+
+def make_business(email: str, trade_name: str) -> BusinessProfile:
+    """Create a user and return just their business profile."""
+    return make_user(email, trade_name).business
 
 
 class AuthTests(APITestCase):
@@ -113,6 +121,160 @@ class ProfileIsolationTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(get_business(self.user_a).user_id, self.user_a.id)
         self.assertEqual(get_business(self.user_b).user_id, self.user_b.id)
+
+
+class InvoicePreferencesTests(APITestCase):
+    """Step A: the 1.4 invoice preferences on the business profile."""
+
+    def setUp(self):
+        self.user = make_user("owner@example.com", "Prefs Traders")
+        self.url = reverse("business-profile")
+
+    def test_new_business_defaults_are_safe(self):
+        """Unregistered + no rounding + INV prefix. Charging no tax is the safe default."""
+        self.client.force_authenticate(self.user)
+        data = self.client.get(self.url).data
+        self.assertEqual(data["gst_registration_type"], "UNREGISTERED")
+        self.assertFalse(data["round_invoice_total"])
+        self.assertEqual(data["invoice_number_prefix"], "INV")
+
+    def test_invoice_preferences_can_be_saved(self):
+        self.client.force_authenticate(self.user)
+        response = self.client.patch(
+            self.url,
+            {
+                "gst_registration_type": "REGULAR",
+                "round_invoice_total": True,
+                "invoice_number_prefix": "acme",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["gst_registration_type"], "REGULAR")
+        self.assertTrue(response.data["round_invoice_total"])
+        self.assertEqual(response.data["invoice_number_prefix"], "ACME")  # upper-cased
+
+    def test_prefix_rejects_characters_outside_the_rule46_set(self):
+        self.client.force_authenticate(self.user)
+        for bad in ("TOOLONG", "IN V", "INV/26", "", "IN#"):
+            with self.subTest(prefix=bad):
+                response = self.client.patch(
+                    self.url, {"invoice_number_prefix": bad}, format="json"
+                )
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("invoice_number_prefix", response.data["errors"])
+
+    def test_registration_type_rejects_unknown_values(self):
+        self.client.force_authenticate(self.user)
+        response = self.client.patch(
+            self.url, {"gst_registration_type": "SOMETHING"}, format="json"
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_preferences_are_per_business(self):
+        self.user_b = make_user("b@example.com", "Beta Stores")
+        self.client.force_authenticate(self.user_b)
+        self.client.patch(
+            self.url, {"invoice_number_prefix": "BETA"}, format="json"
+        )
+        self.client.force_authenticate(self.user)
+        self.assertEqual(self.client.get(self.url).data["invoice_number_prefix"], "INV")
+
+
+class WalkInPartyTests(APITestCase):
+    """Step A: one walk-in customer per business, created idempotently."""
+
+    def test_registration_creates_a_walk_in_party(self):
+        response = self.client.post(
+            reverse("register"),
+            {"email": "walk@example.com", "password": STRONG_PASSWORD, "trade_name": "Corner Shop"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201)
+        user = User.objects.get(email="walk@example.com")
+        walk_in = Party.objects.get(business=user.business, name=WALK_IN_PARTY_NAME)
+        self.assertEqual(walk_in.party_type, Party.PartyType.CUSTOMER)
+        self.assertEqual(walk_in.gstin, "")
+        self.assertTrue(walk_in.is_active)
+
+    def test_walk_in_uses_the_business_state_and_valid_mobile(self):
+        business = make_business("s@example.com", "State Shop")
+        business.state_code = "27"
+        business.save(update_fields=["state_code", "updated_at"])
+        walk_in = get_or_create_walk_in_party(business)
+        self.assertEqual(walk_in.state_code, "27")
+        self.assertRegex(walk_in.mobile, r"^[6-9][0-9]{9}$")
+
+    def test_creating_twice_returns_the_same_party(self):
+        business = make_business("twice@example.com", "Twice Shop")
+        first = get_or_create_walk_in_party(business)
+        second = get_or_create_walk_in_party(business)
+        self.assertEqual(first.pk, second.pk)
+        self.assertEqual(
+            Party.objects.filter(business=business, name=WALK_IN_PARTY_NAME).count(), 1
+        )
+
+    def test_walk_in_state_is_backfilled_once_the_business_sets_one(self):
+        business = make_business("late@example.com", "Late Shop")
+        business.state_code = ""  # brand-new profile, no state yet
+        business.save(update_fields=["state_code", "updated_at"])
+        walk_in = get_or_create_walk_in_party(business)
+        self.assertEqual(walk_in.state_code, "")
+
+        # The user later completes their profile. The next call tops the walk-in up.
+        business.state_code = "33"
+        business.save(update_fields=["state_code", "updated_at"])
+        refreshed = get_or_create_walk_in_party(business)
+        self.assertEqual(refreshed.pk, walk_in.pk)  # same row, not a duplicate
+        self.assertEqual(refreshed.state_code, "33")
+
+    def test_walk_in_parties_are_scoped_per_tenant(self):
+        business_a = make_business("wa@example.com", "Walk A")
+        business_b = make_business("wb@example.com", "Walk B")
+        walk_a = get_or_create_walk_in_party(business_a)
+        walk_b = get_or_create_walk_in_party(business_b)
+        self.assertNotEqual(walk_a.pk, walk_b.pk)
+        self.assertEqual(walk_a.business, business_a)
+        self.assertEqual(walk_b.business, business_b)
+
+
+class ThrottleConfigTests(APITestCase):
+    """
+    Throttling is configured globally, and login has its own tighter scope.
+    These prove the config is actually wired, not just present in settings.
+    """
+
+    def test_throttle_classes_are_configured(self):
+        settings_rf = settings.REST_FRAMEWORK
+        self.assertIn(
+            "rest_framework.throttling.ScopedRateThrottle",
+            settings_rf["DEFAULT_THROTTLE_CLASSES"],
+        )
+        for scope in ("anon", "user", "login", "preview"):
+            self.assertIn(scope, settings_rf["DEFAULT_THROTTLE_RATES"])
+
+    def test_login_view_uses_the_login_scope(self):
+        from apps.accounts.urls import ThrottledTokenObtainPairView
+
+        self.assertEqual(ThrottledTokenObtainPairView.throttle_scope, "login")
+
+    def test_repeated_login_attempts_eventually_get_throttled(self):
+        """A wrong password repeatedly must start returning 429, not 401 forever."""
+        self.client.post(
+            reverse("login"), {"email": "nobody@example.com", "password": "Wrong!Pass#1"},
+            format="json",
+        )
+        statuses = []
+        for _ in range(15):
+            response = self.client.post(
+                reverse("login"),
+                {"email": "nobody@example.com", "password": "Wrong!Pass#1"},
+                format="json",
+            )
+            statuses.append(response.status_code)
+            if response.status_code == 429:
+                break
+        self.assertIn(429, statuses, f"never throttled; statuses were {set(statuses)}")
 
 
 class GetBusinessTests(APITestCase):

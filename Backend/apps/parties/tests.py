@@ -399,6 +399,159 @@ class PartyFilterTests(APITestCase):
 # ===========================================================================
 # Model helpers
 # ===========================================================================
+class PartySoftDeleteReuseTests(APITestCase):
+    """
+    A soft-deleted party frees its GSTIN/PAN for re-use, and restoring a party
+    whose identifier has since been taken fails with a clear 400 rather than an
+    IntegrityError (500).
+    """
+
+    def setUp(self):
+        self.user, self.business = make_user("owner@example.com", "Reuse Traders")
+
+    def test_soft_deleted_partys_gstin_can_be_reused(self):
+        deleted = make_party(self.business, name="Deleted One", gstin="", pan="",
+                             mobile="9000000001")
+        deleted.gstin = "36ABCCS2942R1ZR"
+        deleted.pan = "ABCCS2942R"
+        deleted.is_active = False
+        deleted.save()
+
+        # Same GSTIN, different party, still active -> allowed now.
+        replacement = make_party(self.business, name="Replacement",
+                                 gstin="36ABCCS2942R1ZR", pan="ABCCS2942R",
+                                 mobile="9000000002")
+        self.assertEqual(replacement.gstin, "36ABCCS2942R1ZR")
+
+    def test_duplicate_still_blocked_while_both_are_active(self):
+        make_party(self.business, name="First", gstin="36ABCCS2942R1ZR", pan="ABCCS2942R",
+                   mobile="9000000003")
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                make_party(self.business, name="Second", gstin="36ABCCS2942R1ZR",
+                           pan="", mobile="9000000004")
+
+    def test_restore_succeeds_when_identifier_is_free(self):
+        party = make_party(self.business, name="Restorable", gstin="", pan="",
+                           mobile="9000000005")
+        party.gstin = "29AAACA1234A1Z5"
+        party.pan = "AAACA1234A"
+        party.is_active = False
+        party.save()
+
+        self.client.force_authenticate(self.user)
+        response = self.client.post(reverse("party-restore", args=[party.pk]))
+        self.assertEqual(response.status_code, 200)
+        party.refresh_from_db()
+        self.assertTrue(party.is_active)
+
+    def test_restore_returns_400_when_gstin_was_taken_meanwhile(self):
+        released = make_party(self.business, name="Released", gstin="", pan="",
+                              mobile="9000000006")
+        released.gstin = "29AAACA1234A1Z5"
+        released.pan = "AAACA1234A"
+        released.is_active = False
+        released.save()
+
+        make_party(self.business, name="New owner", gstin="29AAACA1234A1Z5", pan="",
+                   mobile="9000000007")
+
+        self.client.force_authenticate(self.user)
+        response = self.client.post(reverse("party-restore", args=[released.pk]))
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["error"], "DUPLICATE_IDENTIFIER")
+        self.assertIn("GSTIN", response.data["message"])
+        released.refresh_from_db()
+        self.assertFalse(released.is_active)  # not half-restored
+
+
+class PartyShippingStateTests(APITestCase):
+    """shipping_state_code drives place of supply for goods on an invoice."""
+
+    def setUp(self):
+        self.user, self.business = make_user("owner@example.com", "Shipping Traders")
+        self.list_url = reverse("party-list")
+        self.client.force_authenticate(self.user)
+
+    def payload(self, **overrides):
+        base = {**VALID_PARTY, "gstin": "", "pan": ""}
+        base.update(overrides)
+        return base
+
+    def test_shipping_state_is_accepted_with_a_shipping_address(self):
+        response = self.client.post(
+            self.list_url,
+            self.payload(shipping_address="9 Warehouse Rd", shipping_city="Pune",
+                         shipping_pincode="411001", shipping_state_code="27"),
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["shipping_state_code"], "27")
+
+    def test_shipping_state_rejected_without_a_shipping_address(self):
+        response = self.client.post(
+            self.list_url, self.payload(shipping_state_code="27"), format="json"
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("shipping_state_code", response.data["errors"])
+
+    def test_invalid_shipping_state_is_rejected(self):
+        response = self.client.post(
+            self.list_url,
+            self.payload(shipping_address="9 Warehouse Rd", shipping_state_code="99"),
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_blank_shipping_state_is_the_default(self):
+        response = self.client.post(
+            self.list_url,
+            self.payload(shipping_address="9 Warehouse Rd", shipping_state_code=""),
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["shipping_state_code"], "")
+
+    def test_patch_clearing_shipping_address_must_clear_shipping_state_too(self):
+        party = make_party(self.business, name="Has shipping", gstin="", pan="",
+                           mobile="9000000008")
+        party.shipping_address = "9 Warehouse Rd"
+        party.shipping_state_code = "27"
+        party.save()
+
+        response = self.client.patch(
+            reverse("party-detail", args=[party.pk]),
+            {"shipping_address": ""},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("shipping_state_code", response.data["errors"])
+
+    def test_patch_of_an_unrelated_field_keeps_the_shipping_state(self):
+        party = make_party(self.business, name="Keep shipping", gstin="", pan="",
+                           mobile="9000000009")
+        party.shipping_address = "9 Warehouse Rd"
+        party.shipping_state_code = "27"
+        party.save()
+
+        response = self.client.patch(
+            reverse("party-detail", args=[party.pk]), {"name": "Renamed"}, format="json"
+        )
+        self.assertEqual(response.status_code, 200)
+        party.refresh_from_db()
+        self.assertEqual(party.shipping_state_code, "27")
+
+    def test_shipping_state_does_not_leak_across_tenants(self):
+        """The field is per-party, so tenant scoping must be unaffected."""
+        self.user_b, self.business_b = make_user("b@example.com", "Beta Stores")
+        make_party(self.business_b, name="Beta item", shipping_address="1 Elsewhere",
+                   shipping_state_code="33", gstin="", pan="", mobile="9000000010")
+
+        self.client.force_authenticate(self.user)
+        names = {p["name"] for p in self.client.get(self.list_url).data["results"]}
+        self.assertNotIn("Beta item", names)
+
+
 class PartyModelTests(APITestCase):
     def setUp(self):
         self.user, self.business = make_user("owner@example.com", "Model Traders")

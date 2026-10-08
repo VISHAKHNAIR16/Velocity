@@ -8,7 +8,13 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .constants import GST_STATE_CHOICES
+from apps.core.constants import (
+    GST_RATE_CHOICES,
+    GST_STATE_CHOICES,
+    MEASURING_UNITS,
+    gst_rate_label,
+)
+
 from .models import BusinessProfile
 from .serializers import BusinessProfileSerializer, LogoUploadSerializer, RegisterSerializer
 from .services import get_business
@@ -72,3 +78,33 @@ class StateListView(APIView):
 
     def get(self, request):
         return Response([{"code": code, "name": name} for code, name in GST_STATE_CHOICES])
+
+
+class MeasuringUnitListView(APIView):
+    """
+    GET /api/v1/meta/units/ : the measuring units an invoice line may use.
+
+    Served from the same constant the backend validates against, so a custom
+    line in the browser can never offer a unit the server would reject.
+    """
+
+    def get(self, request):
+        return Response([{"code": code, "name": name} for code, name in MEASURING_UNITS])
+
+
+class GstRateListView(APIView):
+    """
+    GET /api/v1/meta/tax-rates/ : the GST slabs, with their display labels.
+
+    The rates come from `GST_RATE_CHOICES`, which is also what the serializer
+    validates line tax rates against, so the dropdown cannot drift from the
+    server's idea of a valid rate.
+    """
+
+    def get(self, request):
+        return Response(
+            [
+                {"code": str(rate), "name": gst_rate_label(rate)}
+                for rate, _label in GST_RATE_CHOICES
+            ]
+        )

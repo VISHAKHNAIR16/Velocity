@@ -71,6 +71,9 @@ INSTALLED_APPS = [
     "apps.core",
     "apps.parties",
     "apps.inventory",
+    # Phase 1.4: added now (before its models exist) so the Step B calculator
+    # and its tests are importable and discoverable.
+    "apps.invoices",
 ]
 
 MIDDLEWARE = [
@@ -180,6 +183,20 @@ REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "EXCEPTION_HANDLER": "config.exceptions.api_exception_handler",
     "PAGE_SIZE": 20,
+    # Throttling. Applied globally; a view opts into a stricter named rate with
+    # `throttle_scope`. POST /invoices/preview/ runs the whole GST calculation on
+    # every keystroke-debounce, so it gets its own scope below.
+    "DEFAULT_THROTTLE_CLASSES": (
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.UserRateThrottle",
+        "rest_framework.throttling.ScopedRateThrottle",
+    ),
+    "DEFAULT_THROTTLE_RATES": {
+        "anon": "60/hour",      # unauthenticated (register / login)
+        "user": "600/hour",     # signed-in browsing and normal CRUD
+        "login": "10/minute",   # brute-force protection
+        "preview": "120/minute",
+    },
 }
 
 SIMPLE_JWT = {

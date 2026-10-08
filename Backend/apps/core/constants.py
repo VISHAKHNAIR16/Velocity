@@ -59,16 +59,28 @@ GST_STATE_CHOICES = [
 # ---------------------------------------------------------------------------
 # Values are Decimal (never float / int) so they drop straight into a
 # DecimalField and into the calculator without a conversion step.
-# 0.25% and 1.5% cover rough diamonds and diamond job-work.
+#
+# SLAB HISTORY: the 56th GST Council restructured the structure effective
+# 22 Sept 2025 - mainly 5% and 18%, with a 40% de-merit rate for specified goods
+# (tobacco continues at 28% + cess). 12% and 28% are RETIRED for new invoices but
+# are kept here on purpose: invoices already issued at those rates must stay
+# reproducible, and the rate is stored per line.
+# TODO (confirm with a CA): whether 12/28 should still appear in the *dropdown*.
+#
+# ⚠️ 0% IS AMBIGUOUS. `Decimal("0.00")` currently covers BOTH nil-rated and
+# exempt supplies, but GSTR-1 reports them in SEPARATE tables (nil-rated vs
+# exempt). Do not treat them as interchangeable. Splitting them into distinct
+# rates is a later migration plus a change to the calculator's tax gate.
 GST_RATE_CHOICES = [
     (Decimal("0.00"), "0%"),
     (Decimal("0.25"), "0.25%"),
     (Decimal("1.50"), "1.5%"),
     (Decimal("3.00"), "3%"),
     (Decimal("5.00"), "5%"),
-    (Decimal("12.00"), "12%"),
+    (Decimal("12.00"), "12% (retired)"),
     (Decimal("18.00"), "18%"),
-    (Decimal("28.00"), "28%"),
+    (Decimal("28.00"), "28% (retired)"),
+    (Decimal("40.00"), "40%"),
 ]
 
 DEFAULT_GST_RATE = Decimal("18.00")
@@ -106,6 +118,22 @@ MEASURING_UNITS = [
 
 DEFAULT_UNIT = "PCS"
 VALID_UNITS = frozenset(code for code, _ in MEASURING_UNITS)
+
+# ---------------------------------------------------------------------------
+# Union territories without a legislature
+# ---------------------------------------------------------------------------
+# Intra-state supply inside these UTs is charged **CGST + UTGST**, not CGST + SGST.
+# The arithmetic is identical, so the amount is stored in the same columns and
+# only the label differs (see `state_tax_label` in the GST calculator).
+# The other UTs/UTs (J&K, Delhi, Puducherry) do have legislatures, so they use SGST.
+#
+# ⚠️ Confirm this list with a CA before launch (1.4.8 compliance Q4).
+UT_WITHOUT_LEGISLATURE = frozenset({"04", "26", "31", "35", "38"})
+
+
+def is_ut_without_legislature(state_code: str) -> bool:
+    """True when intra-state tax in this state code is CGST + UTGST."""
+    return state_code in UT_WITHOUT_LEGISLATURE
 
 # ---------------------------------------------------------------------------
 # HSN (goods) / SAC (services) codes

@@ -3,6 +3,7 @@
 from django.db.models import Q
 from rest_framework import filters
 from rest_framework.decorators import action
+from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -10,7 +11,50 @@ from apps.core.constants import GST_RATE_CHOICES, MEASURING_UNITS, gst_rate_labe
 from apps.core.viewsets import TenantModelViewSet
 
 from .models import Item
-from .serializers import ItemListSerializer, ItemSerializer
+from .serializers import ItemImageUploadSerializer, ItemListSerializer, ItemSerializer
+
+
+class ItemImageUploadView(APIView):
+    """
+    PUT /api/v1/items/{id}/image/ uploads or replaces the item photo.
+    DELETE /api/v1/items/{id}/image/ removes it.
+
+    Kept separate from the item write endpoint (like the business logo) so image
+    validation happens in exactly one place and the field stays read-only on the
+    normal serializer.
+    """
+
+    parser_classes = [MultiPartParser]
+
+    def _get_item(self, pk):
+        # Scoped to the caller's business: another tenant's id is a 404.
+        return Item.objects.get(pk=pk, business=self._business())
+
+    def _business(self):
+        from apps.accounts.services import get_business
+
+        return get_business(self.request.user)
+
+    def put(self, request, pk):
+        item = self._get_item(pk)
+        serializer = ItemImageUploadSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        # Replace rather than accumulate: drop the old file so storage is not
+        # left filling with orphans (see FUTURE_CHECKLIST §7).
+        if item.image:
+            item.image.delete(save=False)
+        item.image = serializer.validated_data["image"]
+        item.save(update_fields=["image", "updated_at"])
+        return Response(ItemSerializer(item).data)
+
+    def delete(self, request, pk):
+        item = self._get_item(pk)
+        if item.image:
+            item.image.delete(save=False)
+            item.image = None
+            item.save(update_fields=["image", "updated_at"])
+        return Response(ItemSerializer(item).data)
 
 
 class UnitListView(APIView):

@@ -15,6 +15,25 @@ from apps.core.constants import (
 from .models import Item
 
 
+class ItemImageUploadSerializer(serializers.Serializer):
+    """
+    Validates an uploaded item photo: a real image, an allowed type, and a size
+    limit. Mirrors LogoUploadSerializer so both behave identically.
+    """
+
+    MAX_BYTES = 2 * 1024 * 1024  # 2 MB
+    ALLOWED_FORMATS = {"JPEG", "PNG", "WEBP"}
+
+    image = serializers.ImageField()  # opened with Pillow, so non-images are rejected
+
+    def validate_image(self, file):
+        if file.size > self.MAX_BYTES:
+            raise serializers.ValidationError("Image must be 2 MB or smaller.")
+        if file.image.format not in self.ALLOWED_FORMATS:
+            raise serializers.ValidationError("Use a JPG, PNG or WebP image.")
+        return file
+
+
 class ItemListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for list views."""
 
@@ -46,6 +65,7 @@ class ItemListSerializer(serializers.ModelSerializer):
             "low_stock_threshold",
             "is_low_stock",
             "is_active",
+            "image",
             "created_at",
         ]
 
@@ -93,10 +113,13 @@ class ItemSerializer(serializers.ModelSerializer):
             "low_stock_threshold",
             "is_low_stock",
             "is_active",
+            "image",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        # `image` is read-only: it is set through the upload endpoint so image
+        # format/size validation lives in one place (see ItemImageUploadSerializer).
+        read_only_fields = ["id", "image", "created_at", "updated_at"]
         extra_kwargs = {
             # Services never carry stock, so the field may legitimately be absent.
             "current_stock": {"required": False},

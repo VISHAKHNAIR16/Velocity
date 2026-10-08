@@ -85,6 +85,27 @@ phone_validator = RegexValidator(r"^[0-9]{6,15}$", "Enter digits only (6 to 15 d
 account_number_validator = RegexValidator(
     r"^[0-9]{9,18}$", "Account number must be 9 to 18 digits."
 )
+# Invoice number prefix: short and unambiguous. GST Rule 46 caps the whole
+# invoice number at 16 characters, and the prefix is part of it, so keep it to
+# 1-4 characters of letters, digits or a hyphen.
+invoice_prefix_validator = RegexValidator(
+    r"^[A-Z0-9-]{1,4}$",
+    "Prefix must be 1-4 characters using A-Z, 0-9 or a hyphen (e.g. INV).",
+)
+
+
+class HsnRequirement(models.TextChoices):
+    """
+    How strictly HSN/SAC codes are demanded when issuing an invoice.
+
+    GST law requires HSN on a B2B invoice only when its value exceeds Rs 5,000.
+    `STRICT` requires it on every line regardless, which over-complies: an
+    under-complied tax invoice cannot be fixed after the fact, while an extra
+    HSN code is harmless. `STATUTORY` implements the threshold literally.
+    """
+
+    STRICT = "STRICT", "Strict - every line"
+    STATUTORY = "STATUTORY", "Statutory - above Rs 5,000 to a GSTIN holder"
 
 
 class BusinessProfile(models.Model):
@@ -131,6 +152,47 @@ class BusinessProfile(models.Model):
     )
     bank_name = models.CharField(max_length=100, blank=True)
     bank_branch = models.CharField(max_length=100, blank=True)
+
+    # --- Invoice preferences (used by the 1.4 invoicing engine) ---
+    class GstRegistrationType(models.TextChoices):
+        REGULAR = "REGULAR", "Regular"
+        COMPOSITION = "COMPOSITION", "Composition"
+        UNREGISTERED = "UNREGISTERED", "Unregistered"
+
+    gst_registration_type = models.CharField(
+        max_length=15,
+        choices=GstRegistrationType.choices,
+        default=GstRegistrationType.UNREGISTERED,
+        help_text=(
+            "Only 'Regular' businesses may charge GST on an invoice. Composition "
+            "and Unregistered businesses must show tax as zero and use the title "
+            "'Bill of Supply'."
+        ),
+    )
+    round_invoice_total = models.BooleanField(
+        default=False,
+        help_text=(
+            "Round the invoice total to the nearest rupee and show a 'Round Off' "
+            "line. Presentation only: taxable values and tax amounts never change."
+        ),
+    )
+    invoice_number_prefix = models.CharField(
+        max_length=4,
+        default="INV",
+        validators=[invoice_prefix_validator],
+        help_text="1-4 letters/digits used at the start of the invoice number, e.g. INV.",
+    )
+    hsn_requirement = models.CharField(
+        max_length=10,
+        choices=HsnRequirement.choices,
+        default=HsnRequirement.STRICT,
+        help_text=(
+            "STRICT asks for an HSN/SAC code on every line of every tax invoice. "
+            "STATUTORY only requires it above Rs 5,000 to a GSTIN holder, which "
+            "is what the law actually says. STRICT over-complies on purpose - "
+            "confirm with your CA before switching."
+        ),
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
