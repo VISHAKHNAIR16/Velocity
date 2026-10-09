@@ -752,6 +752,27 @@ before 2.1; **P1** = must be done before any real customer.
 
 #### 2.0.1 CI first (P0) — everything after this is protected by it
 
+> **Every Python file in this repo lives under `Backend/`** — `pyproject.toml`, `uv.lock`,
+> `requirements.txt` and `manage.py` are all there and **none of them exist at the repository
+> root**. The workflow therefore sets `defaults.run.working-directory: Backend`. This is not
+> cosmetic: `actions/checkout@v4` is a `uses:` step, so it still clones to the root, and only
+> `run:` steps move.
+>
+> The first run failed in **33 seconds**, all five jobs, every one at its first real step:
+>
+> | Job | Died at | Error |
+> |---|---|---|
+> | `lint + SQLite suite` | Install dependencies | `No pyproject.toml found in current directory or any parent directory` |
+> | `check --deploy` | Install dependencies | same |
+> | `Contract smoke` | Install dependencies | same |
+> | `PostgreSQL concurrency` | Install dependencies | same |
+> | `pip-audit` | Audit runtime dependencies | `requirements.txt` not at the root |
+>
+> **Why the local check missed it:** every command was verified from `Backend/`, which is where
+> they were run by hand. Nothing verified that the *workflow* would run them from there. A
+> command that works locally proves nothing about where CI executes it — the same class of
+> mistake as "the SQLite concurrency test passes". Fixed and re-verified.
+
 - [x] **`.github/workflows/ci.yml`**, on every push and pull request:
   - Job `test-sqlite`: install deps (`uv`), `ruff check`, `python manage.py makemigrations --check --dry-run`, full suite on SQLite.
   - Job `test-postgres`: `services: postgres: image: postgres:16`; set `TEST_DATABASE_URL` to the service; run **only** the concurrency classes with `--settings=config.settings_test_pg`. This removes the Docker/WSL prerequisite on your laptop entirely.
@@ -760,7 +781,12 @@ before 2.1; **P1** = must be done before any real customer.
   - Step `pip-audit` — **blocking from day one** on runtime deps; dev deps audited but non-blocking, because a lint-tool CVE is not a production risk and blocking on one is how teams end up disabling the audit.
   - **No production secrets in CI.** Dummy `SECRET_KEY`, no `DATABASE_URL`, no `CLOUDINARY_URL`.
 - [ ] Branch protection: make the jobs required checks on `main`. **Needs your GitHub account — see the report.**
-- [ ] **Done when (mutation spot-check):** temporarily delete the `select_for_update()` in the issue path — the Postgres job **must fail**. Restore it. A CI job that cannot fail proves nothing. **Written into the workflow as a PR-only guard step, but it can only be *proved* once CI has run once.**
+- [x] **Done when (mutation spot-check): the Postgres job must go red when the locking code is removed.**
+  - ⚠️ **The mutation was wrong the first time and would have faked its own success.** The original guard did `sed 's/select_for_update()//'`, which leaves `Invoice.objects.` behind — a **SyntaxError**. The suite would fail instantly for a reason that has nothing to do with concurrency, so the guard would report "good" while proving nothing at all. Same family as the SQLite `select_for_update` trap, one level down.
+  - Corrected to `sed 's/select_for_update()/all()/g'`, which yields `Invoice.objects.all()` — still valid Python, still no `FOR UPDATE`. Verified with the same GNU sed GitHub uses.
+  - The step now also **asserts the mutation is syntactically valid first**, so a malformed mutation fails as *"the guard is broken"* rather than being mistaken for a detected bug.
+  - **Proven locally against Neon PostgreSQL:** with the mutation applied, the suite exits **1**, failing `test_same_invoice_issued_concurrently_gets_one_number` (`Ran 6 tests, FAILED (failures=1)`). The tests genuinely detect a missing row lock. `issue.py` was restored and is byte-identical to `HEAD`.
+  - Still runs in CI only on `pull_request`, so it is **proven but not yet exercised in CI** — a throwaway PR will confirm the whole job end to end.
 
 #### 2.0.2 Walk-in as a flag (P0, decision 21)
 

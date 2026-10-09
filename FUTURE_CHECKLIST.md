@@ -8,10 +8,13 @@ Legend: [ ] not started, [x] done
 
 ## 1. Security
 
-- [ ] **Login/register rate limiting.** Left out on purpose: behind Render's proxy, DRF sees one shared IP, so a limit would lock out all users together. Fix: configure `NUM_PROXIES` correctly (verify the real `X-Forwarded-For` header on Render), or throttle per email address.
+- [ ] **Login/register rate limiting.** ~~Left out on purpose~~ **Partly done in 2.0.1; the root problem is still open.** All three unauthenticated auth endpoints now share a 10/minute `auth` scope (register and refresh previously had **no** scope at all and fell through to `anon: 60/hour`). What is still missing is `NUM_PROXIES`, so behind Render's proxy every anonymous caller still lands in one IP bucket and one attacker locks out everyone. Fix: configure `NUM_PROXIES` correctly (verify the real `X-Forwarded-For` header on Render from a staging request — a wrong value is silent), or throttle per email address. Tracked as 2.0.5 / decision 24.
 - [ ] **Email verification** on registration (stops fake or mistyped emails).
 - [ ] **Forgot / reset password** flow by email.
-- [ ] **JWT blacklist on logout** (`rest_framework_simplejwt.token_blacklist`) so stolen refresh tokens can be revoked.
+- [x] **JWT blacklist on logout** (`rest_framework_simplejwt.token_blacklist`) so stolen refresh tokens can be revoked. **Done backend-side in 2.0.1 (decision 41):** the app is installed, `BLACKLIST_AFTER_ROTATION = True`, and `POST /api/v1/auth/logout/` blacklists the refresh token, alongside `GET /auth/sessions/`, `DELETE /auth/sessions/{id}/` and `POST /auth/sessions/revoke-others/`.
+      - ⚠️ **The frontend does not call any of it yet.** Until a logout button calls `/auth/logout/`, logout from the browser still only deletes its local copy, so from a user's point of view this is unfinished. **Do not tick the user-facing item off on the strength of the API alone.**
+      - Note the honest limit: **access tokens cannot be revoked** (stateless), so a revoked session can survive for up to one access-token lifetime. The UI must not promise an instant cut-off.
+      - Sessions that predate the migration have no row, so they cannot be listed or revoked. Acceptable pre-launch; the sweep would be blacklisting every `OutstandingToken` for the user.
 - [ ] **Move JWT from localStorage to httpOnly cookies** (removes the XSS token-theft risk). Needs same-site setup or a shared parent domain.
 - [ ] **Registration enumeration:** "email already exists" reveals who has an account. Consider a generic response plus email confirmation.
 - [ ] **GSTIN ownership check.** Currently only the format is validated. Verify against the GST portal API or a verification provider, and stop two accounts claiming one GSTIN.
@@ -49,7 +52,9 @@ Legend: [ ] not started, [x] done
 ## 4. Quality and Operations
 
 - [ ] Automated tests: especially multi-tenant isolation (User A must never see User B's data), GST calculations, and stock changes.
-- [ ] GitHub Actions CI: run `ruff` and tests on each push.
+- [x] **GitHub Actions CI: run `ruff` and tests on each push.** **Done in 2.0.1 (decision 27).** Five jobs: `lint + SQLite suite`, `PostgreSQL concurrency`, `Contract smoke (real HTTP)`, `check --deploy`, `pip-audit`.
+      - ⚠️ **Branch protection is still NOT configured.** Until the five jobs are made *required* checks on `main`, red does not block a merge, and "CI is green" remains a habit rather than a gate. This is the single most important remaining CI item.
+      - **Do not delete `defaults.run.working-directory: Backend`.** Every Python file lives under `Backend/` (`pyproject.toml`, `uv.lock`, `requirements.txt`, `manage.py`); none exist at the repo root. Removing that block makes all five jobs fail in ~30 seconds with `No pyproject.toml found in current directory or any parent directory`. See §12.
 - [ ] Pre-commit hooks (ruff format and lint).
 - [ ] Error monitoring (Sentry free tier) and structured logging.
 - [ ] Uptime monitor that pings `/api/v1/health/` so Render's free tier stays awake (or move to a paid instance).
@@ -84,7 +89,7 @@ Legend: [ ] not started, [x] done
 
 ## 8. Multi-Tenancy and Testing (added with the tenant base)
 
-- [ ] Run the test suite against PostgreSQL in CI. Local tests use in-memory SQLite for speed, so Postgres-specific behaviour is not covered.
+- [x] **Run the test suite against PostgreSQL in CI.** Local tests use in-memory SQLite for speed, so Postgres-specific behaviour is not covered. **Done in 2.0.1:** a `postgres:16` service container runs the concurrency classes, which removes the Docker/WSL and remote-Neon prerequisites from the developer machine entirely. Verified locally against Neon PostgreSQL — 431 tests, 0 skipped.
 - [ ] Add PostgreSQL Row-Level Security as a second layer of tenant isolation (defence in depth if application code ever forgets a filter).
 - [ ] Add query-count assertions (`assertNumQueries`) to list endpoints to catch N+1 problems early.
 - [ ] Tenant data export and deletion tool (full account closure, with Cloudinary file cleanup).
@@ -199,8 +204,10 @@ Surfaced while designing the GST engine and **deliberately deferred**, so nothin
       migration plus a change to the calculator's registration gate.
 - [ ] **Compensation cess** on luxury/demerit goods — no cess column exists, so no 1.4 invoice can
       carry one. Confirm no user needs it (see 1.4.8 compliance Q8).
-- [ ] **Turnover-based HSN thresholds.** The `HSN_REQUIRED` gate is unconditional, which is stricter
-      than the statutory ₹5,000-per-invoice B2B threshold. Make the threshold a business setting.
+- [x] **Turnover-based HSN digit minimum.** ~~The `HSN_REQUIRED` gate is unconditional, which is stricter than the statutory ₹5,000-per-invoice B2B threshold. Make the threshold a business setting.~~ **Done in 2.0.3 (decision 22).**
+      ⚠️ **This entry used to state the law wrongly and must not be revived.** It described a "statutory ₹5,000-per-invoice B2B threshold" as the rule. There is no per-invoice ₹5,000 HSN rule — ₹5,000 is an old reverse-charge daily limit. The digit count required depends on the **business's own annual turnover** (4 digits up to ₹5 crore, 6 above), not on an invoice's value or its recipient. Decision 22 therefore **removed** the `STATUTORY` mode entirely rather than making it configurable: `BusinessProfile.hsn_min_digits` is `4` (default) or `6`, and every line of every tax invoice needs a code of at least that length.
+      - Both readings are ⚖️-marked and **still need a CA to confirm** (tasks.md 1.4.8 question 1). The default of `4` is the permissive one, chosen because a superfluous digit is recoverable and a missing one is not.
+      - Still worth doing: a **UI affordance** that only *warns* about a too-short code before issue, since the server currently refuses at issue time.
 - [ ] **SEZ / OIDAR (state codes 96/97).** Explicitly rejected for now; they need a separate
       "zero-rated supply" concept rather than a rate of zero.
 - [ ] **One POS per invoice only.** A single invoice mixing goods delivered to two states is
@@ -228,5 +235,42 @@ Surfaced while designing the GST engine and **deliberately deferred**, so nothin
       used by the filters rather than sitting unused.
 - [ ] **Partition or archive issued invoices by financial year** if a single tenant's invoice count
       grows large enough that list queries slow down.
+
+---
+## 12. CI hardening (added after the first GitHub Actions run failed)
+
+Everything here came out of debugging run #1, which failed in **33 seconds**.
+
+- [ ] **Set branch protection.** Make all five jobs required checks on `main`. Until this is done,
+      red does not block anything and the whole workflow is advisory.
+- [ ] **Exercise the mutation guard with one throwaway PR.** The guard only runs
+      `if: github.event_name == 'pull_request'`, so it is *proven locally but never yet proven in
+      CI*. A PR whose only purpose is to trip it is the cheapest possible check that the Postgres
+      job can go red end to end.
+- [x] **Record the accepted `check --deploy` warning instead of silencing it.** `security.W021`
+      (`SECURE_HSTS_PRELOAD`) is accepted deliberately: HSTS is on (3600 s, include-subdomains),
+      and preload additionally submits the domain to the *browser* preload list, which cannot be
+      withdrawn later without users taking manual action. Revisit once the production domain is
+      stable. The accepted list is written into the workflow's `$GITHUB_STEP_SUMMARY` on every run,
+      so a **new** warning forces someone to edit a file rather than quietly suppress a check.
+- [ ] **Raise `SECURE_HSTS_SECONDS` from 1 hour to 1 year** once the domain is stable and verified
+      (also listed in §1).
+- [ ] **Re-check `pip-audit` cadence.** It is now blocking on runtime dependencies (green as of
+      this writing — "No known vulnerabilities found"), with dev dependencies informational.
+      Consider a scheduled weekly run in addition to per-push, so a newly published advisory is
+      caught even on a quiet repo.
+- [ ] **Add `ruff format` as a gate, deliberately later.** The existing code was hand-formatted and
+      47 files differ from `ruff format`'s defaults, so enabling it today means a repo-wide
+      reformat that buries any real diff. `ruff check` is the lint gate; adopting the formatter
+      should be its own single commit.
+- [x] **The `Backend/` working-directory trap is documented** at the top of `ci.yml` and in
+      tasks.md 2.0.1, with the exact per-job failure table. Four of the five jobs die at their
+      first real step, so the symptom is fast and the cause is unambiguous — but it cost a full
+      red run to diagnose, because every one of those commands works perfectly when run by hand
+      from `Backend/`. **A command that works locally proves nothing about where CI runs it.**
+- [ ] **Nothing reads the CI logs yet.** With no `gh` CLI installed and no log shipping, diagnosing
+      run #1 required guessing from the job/step timeline plus reproducing the error locally. It
+      worked, but it was slower than it should have been. Options: install `gh`, or enable step
+      debug logging (`ACTIONS_STEP_DEBUG`) on failure.
 
 ---

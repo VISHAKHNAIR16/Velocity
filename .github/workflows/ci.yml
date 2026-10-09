@@ -25,6 +25,10 @@ on:
   pull_request:
     branches: [main]
 
+defaults:
+  run:
+    working-directory: Backend
+
 # Cancel a superseded run on the same ref. A stale red on an old commit should
 # not sit in the PR checks list.
 concurrency:
@@ -138,19 +142,41 @@ jobs:
           --noinput
           --verbosity 2
 
-      # Proves the job above can actually fail. If this step passes when the
-      # locking code has been deleted, the suite is not testing what we think.
-      # Deliberately run on a scratch branch of the logic, never on main.
+      # Proves the job above can actually fail. A green job that cannot go red is not
+      # proof, it is decoration.
+      #
+      # The mutation replaces `select_for_update()` with `all()` rather than
+      # deleting the call. Deleting it leaves `Invoice.objects.` behind, which is
+      # a **SyntaxError** - the suite would fail instantly for a reason that has
+      # nothing to do with concurrency, so the guard would "pass" while proving
+      # nothing. `all()` keeps the file valid Python and produces a queryset with
+      # no FOR UPDATE lock, which is the real thing the tests must catch.
+      #
+      # Verified locally against Neon PostgreSQL: with this mutation the suite
+      # fails on test_same_invoice_issued_concurrently_gets_one_number.
       - name: "Guard: a deliberately broken suite must fail this job"
         if: github.event_name == 'pull_request'
         run: |
           set +e
-          cp apps/invoices/services/issue.py /tmp/issue.py.bak
-          sed -i 's/select_for_update()//' apps/invoices/services/issue.py
+          TARGET=apps/invoices/services/issue.py
+          cp "$TARGET" /tmp/issue.py.bak
+
+          sed -i 's/select_for_update()/all()/g' "$TARGET"
+
+          # A syntax error here would mean the mutation was malformed, not that
+          # the tests caught anything. Fail loudly and say which it was.
+          if ! uv run python -c "import ast;ast.parse(open('$TARGET').read())"; then
+            cp /tmp/issue.py.bak "$TARGET"
+            echo "::error::The mutation itself produced a SyntaxError - the guard is broken, not the code."
+            exit 1
+          fi
+
           uv run python manage.py test apps.invoices.tests.test_concurrency \
             --settings=config.settings_test_pg --noinput
           STATUS=$?
-          cp /tmp/issue.py.bak apps/invoices/services/issue.py
+
+          cp /tmp/issue.py.bak "$TARGET"
+
           if [ "$STATUS" -eq 0 ]; then
             echo "::error::The concurrency suite PASSED with select_for_update() removed."
             echo "::error::It cannot detect a broken lock, so it proves nothing."
@@ -231,12 +257,20 @@ jobs:
           uv run python manage.py check --deploy 2>&1 | tee /tmp/deploy-check.txt
           STATUS=${PIPESTATUS[0]}
           echo "---"
-          echo "If this fails, either fix the setting or record it below as accepted."
+          echo "Accepted warnings (also recorded in FUTURE_CHECKLIST.md):"
           cat <<'ACCEPTED' >> "$GITHUB_STEP_SUMMARY"
           ## Accepted \`check --deploy\` warnings
 
-          <!-- Add one line per warning we knowingly accept, with a reason. -->
-          _none yet_
+          Add one line per warning we knowingly accept, with a reason.
+
+          - **\`security.W021\` — \`SECURE_HSTS_PRELOAD\` is not enabled. Deliberate.**
+            HSTS is on (3600 s, include-subdomains). Preload additionally submits the
+            domain to the *browser* preload list, which we cannot withdraw later
+            without users taking manual action. For a pre-launch domain that is the
+            wrong trade. Revisit once the production domain is stable.
+
+          _This list is deliberately explicit. A new warning means the file needs
+          editing, not that someone silenced a check._
           ACCEPTED
           exit $STATUS
 
