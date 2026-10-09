@@ -43,6 +43,29 @@ env:
   PYTHON_VERSION: "3.13"
   DJANGO_SETTINGS_MODULE: config.settings_test
 
+  # --- Dummies every job needs -------------------------------------------
+  # `config/settings.py` raises ImproperlyConfigured when `SECRET_KEY` is unset
+  # and DEBUG is false, which is deliberate: booting production without a real
+  # key is unsafe. CI has no `.env` (it is gitignored), so DEBUG falls back to
+  # false and every job that imports Django dies on import.
+  #
+  # **This hides locally.** `Backend/.env` sets DEBUG=True, so locally Django
+  # falls back to a placeholder key and the failure cannot appear. Only CI,
+  # where DEBUG defaults to false, exercises it. Same family as the SQLite
+  # concurrency trap: the local environment is more forgiving than production.
+  #
+  # These values are throwaway. Never put a real key here - a committed CI
+  # secret is a public secret.
+  SECRET_KEY: ci-dummy-secret-key-not-used-anywhere-real-000000000000
+  DEBUG: "False"
+  ALLOWED_HOSTS: "localhost,127.0.0.1"
+  # Explicitly empty so a job can never reach Neon or Cloudinary by accident.
+  # `dj_database_url` falls back to SQLite when DATABASE_URL is blank.
+  DATABASE_URL: ""
+  CLOUDINARY_URL: ""
+  CORS_ALLOWED_ORIGINS: "https://example.com"
+  CSRF_TRUSTED_ORIGINS: "https://example.com"
+
 jobs:
   # -------------------------------------------------------------------------
   # Fast gate: lint, migration drift, and the whole suite on SQLite.
@@ -224,16 +247,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
+      # Only difference from the shared workflow env: this job runs the REAL
+      # settings module, not the test one, so the `if not DEBUG:` block and every
+      # security flag actually execute. SECRET_KEY / DEBUG / ALLOWED_HOSTS /
+      # DATABASE_URL / CLOUDINARY_URL are inherited from the workflow-level block
+      # above and deliberately not repeated here.
       DJANGO_SETTINGS_MODULE: config.settings
-      # Dummy values only. No DATABASE_URL means the SQLite fallback is used,
-      # so this job cannot touch Neon even by mistake.
-      DEBUG: "False"
-      SECRET_KEY: ci-dummy-secret-key-not-used-anywhere-real-000000000000
-      ALLOWED_HOSTS: "localhost"
-      CORS_ALLOWED_ORIGINS: "https://example.com"
-      CSRF_TRUSTED_ORIGINS: "https://example.com"
-      DATABASE_URL: ""
-      CLOUDINARY_URL: ""
     steps:
       - uses: actions/checkout@v4
 

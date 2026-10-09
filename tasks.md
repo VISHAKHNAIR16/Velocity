@@ -762,16 +762,43 @@ before 2.1; **P1** = must be done before any real customer.
 >
 > | Job | Died at | Error |
 > |---|---|---|
-> | `lint + SQLite suite` | Install dependencies | `No pyproject.toml found in current directory or any parent directory` |
+> | `lint-and-test` | Install dependencies | `No pyproject.toml found in current directory or any parent directory` |
 > | `check --deploy` | Install dependencies | same |
-> | `Contract smoke` | Install dependencies | same |
-> | `PostgreSQL concurrency` | Install dependencies | same |
+> | `contract-smoke` | Install dependencies | same |
+> | `postgres-concurrency` | Install dependencies | same |
 > | `pip-audit` | Audit runtime dependencies | `requirements.txt` not at the root |
 >
 > **Why the local check missed it:** every command was verified from `Backend/`, which is where
 > they were run by hand. Nothing verified that the *workflow* would run them from there. A
 > command that works locally proves nothing about where CI executes it — the same class of
 > mistake as "the SQLite concurrency test passes". Fixed and re-verified.
+>
+> ### Second CI run: three jobs died on `ImproperlyConfigured: SECRET_KEY is required`
+>
+> After the working-directory fix, `pip-audit` (never imports Django) and `check --deploy`
+> (which already set its own dummies) went green, and the three remaining Django jobs failed on
+> import:
+>
+> ```
+> config/settings.py, line 50, in <module>
+>     raise ImproperlyConfigured("The SECRET_KEY environment variable is required.")
+> ```
+>
+> `settings.py` raises when `SECRET_KEY` is unset **and** `DEBUG` is false — a correct,
+> deliberate guard, since booting production without a real key is unsafe. CI has no `.env` (it
+> is gitignored), so `DEBUG` falls back to `False` and the guard fires.
+>
+> **This is the second time the local environment has hidden a production-only failure**, and it
+> is the same trap as the SQLite concurrency tests: `Backend/.env` sets **`DEBUG=True`**, so
+> locally Django silently falls back to a placeholder key and the failure is *unreachable*. Only
+> CI, where `DEBUG` defaults to false, exercises it. Fix: the dummy variables now live once in the
+> workflow-level `env:` block and are inherited by every job, with the reasoning recorded next to
+> them.
+>
+> Verified afterwards by running the **entire** suite under a simulated CI environment
+> (`DEBUG=False`, dummy `SECRET_KEY`, blank `DATABASE_URL`): 431 tests OK, ruff clean, no
+> migration drift, contract walk 10/10, and `check --deploy` reporting exactly the one accepted
+> warning with the security block confirmed active (`SECURE_SSL_REDIRECT=True`, HSTS 3600).
 
 - [x] **`.github/workflows/ci.yml`**, on every push and pull request:
   - Job `test-sqlite`: install deps (`uv`), `ruff check`, `python manage.py makemigrations --check --dry-run`, full suite on SQLite.

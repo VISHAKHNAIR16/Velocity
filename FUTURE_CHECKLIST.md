@@ -268,9 +268,19 @@ Everything here came out of debugging run #1, which failed in **33 seconds**.
       first real step, so the symptom is fast and the cause is unambiguous — but it cost a full
       red run to diagnose, because every one of those commands works perfectly when run by hand
       from `Backend/`. **A command that works locally proves nothing about where CI runs it.**
+- [x] **`SECRET_KEY` / `DEBUG` dummies moved to the workflow-level `env:` block** after run #2
+      failed with `ImproperlyConfigured`. `settings.py` deliberately refuses to boot without a
+      secret when `DEBUG` is false; `Backend/.env` sets `DEBUG=True`, so **locally that failure
+      is unreachable** and only CI ever sees it. Second occurrence of the same pattern — *the
+      local environment is more forgiving than production*, in the same way SQLite is more
+      forgiving than PostgreSQL about row locks.
+      - Standing rule for this repo: **anything behind `if not DEBUG:` is untested locally.** Run
+        the suite with `DEBUG=False` at least once per phase, not only `check --deploy`.
 - [ ] **Nothing reads the CI logs yet.** With no `gh` CLI installed and no log shipping, diagnosing
       run #1 required guessing from the job/step timeline plus reproducing the error locally. It
       worked, but it was slower than it should have been. Options: install `gh`, or enable step
       debug logging (`ACTIONS_STEP_DEBUG`) on failure.
+  - This cost real time on **both** runs so far. Installing `gh` is now the highest-value
+    operational fix in this file.
 
 ---
