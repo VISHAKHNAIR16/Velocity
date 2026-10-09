@@ -65,6 +65,24 @@ class Party(TenantModel):
         help_text="2-digit GST state code. Determines intra/inter-state taxation.",
     )
 
+    # --- Is this the walk-in counter customer? (decision 21) ---
+    # A flag, not a name lookup. Decision 20 fixed the "walk-in can't be billed"
+    # bug by letting *every* blank-state party fall back to the business state,
+    # which meant a real customer who left their state blank silently got
+    # CGST+SGST instead of IGST. Only a party explicitly flagged here may borrow
+    # the business state; anyone else with a blank state is refused.
+    #
+    # The state is deliberately never stored for a walk-in (see the data
+    # migration in parties/0006): it is resolved from the business at invoice
+    # time, so it can never go stale when the business moves state.
+    is_walk_in = models.BooleanField(
+        default=False,
+        help_text=(
+            "The business's walk-in / cash customer. At most one per business. "
+            "Its place of supply is resolved from the business at invoice time."
+        ),
+    )
+
     # --- Billing Address ---
     billing_address = models.TextField(blank=True)
     billing_city = models.CharField(max_length=100, blank=True)
@@ -134,6 +152,13 @@ class Party(TenantModel):
                 fields=["business", "pan"],
                 condition=models.Q(pan__gt="", is_active=True),
                 name="unique_pan_per_business",
+            ),
+            # At most ONE walk-in per business (decision 21). Partial on
+            # `is_walk_in`, so every normal customer is unaffected.
+            models.UniqueConstraint(
+                fields=["business"],
+                condition=models.Q(is_walk_in=True),
+                name="one_walk_in_per_business",
             ),
         ]
 

@@ -174,18 +174,20 @@ class IssueGateTests(TestCase):
         self.assertEqual(response.json()["error"], "BUSINESS_PROFILE_INCOMPLETE")
         self.assertEqual(InvoiceCounter.objects.count(), 0, "no number may be burned")
 
-    def test_party_without_a_state_falls_back_to_the_business_state(self):
+    def test_a_named_party_without_a_state_is_refused(self):
         """
-        Decision 9. `Party` has no `is_walk_in` column, so a blank party state is
-        resolved from the business rather than refused.
+        Decision 21 (closes finding #1, P0). Only the party flagged `is_walk_in`
+        may borrow the business state. A real customer with no state must be
+        refused, not silently charged CGST+SGST where IGST was correct.
         """
         draft = self.draft()
         self.party.state_code = ""
         self.party.save(update_fields=["state_code"])
         response = self.client_.post(issue_url(draft["id"]), {}, format="json")
-        self.assertEqual(response.status_code, 201, response.content[:300])
-        self.assertEqual(response.json()["place_of_supply"], "36")
-        self.assertEqual(response.json()["supply_type"], "INTRA")
+        self.assertEqual(response.status_code, 400, response.content[:300])
+        self.assertEqual(response.json()["error"], "PARTY_STATE_MISSING")
+        self.assertEqual(Invoice.objects.get(pk=draft["id"]).status, Invoice.Status.DRAFT)
+        self.assertEqual(InvoiceCounter.objects.count(), 0, "no number may be burned")
 
     def test_unresolvable_place_of_supply_is_refused(self):
         """
@@ -363,21 +365,27 @@ class CancelTests(TestCase):
 
 class WalkInPartyStateTests(TestCase):
     """
-    Decision 9: a party with no billing state - above all the auto-created
-    "Walk-in / Cash Customer" - is supplied from the business's own state.
+    Decision 21, which closes 1.4.9 finding #1 (P0).
 
-    Without this, a walk-in sale is the one invoice type that cannot be created
-    at all, because the walk-in party is created before the business state is
-    known. Found by the step E contract smoke test.
+    The walk-in is a FLAG, not a name, and it is the *only* party allowed to
+    borrow the business's state when its own state is blank - because a customer
+    standing at your counter is supplied from where you are.
+
+    Everything else is unchanged and must stay that way: a normal customer with
+    a blank state is refused with `PARTY_STATE_MISSING`. That is precisely what
+    decision 20 broke by letting every blank-state party fall back.
     """
 
     def setUp(self):
         self.user = make_user(state_code="36")
         self.client_ = api_client_for(self.user)
         self.item = make_item(self.user)
-        # Exactly the shape the walk-in backfill migration creates.
+        # Exactly the shape the parties.0005 backfill migration produces.
         self.walk_in = Party.objects.create(
-            business=self.user.business, name="Walk-in / Cash Customer"
+            business=self.user.business,
+            name="Walk-in / Cash Customer",
+            mobile="9876543210",
+            is_walk_in=True,
         )
         self.assertEqual(self.walk_in.state_code, "")
 
@@ -403,8 +411,6 @@ class WalkInPartyStateTests(TestCase):
         self.assertEqual(draft.status_code, 201, draft.content[:300])
 
         response = self.client_.post(issue_url(draft.json()["id"]), {}, format="json")
-        # PARTY_STATE_MISSING still applies to a *named* party with no state, but
-        # a walk-in sale is supplied from the business, so it must issue.
         self.assertEqual(response.status_code, 201, response.content[:300])
         self.assertEqual(response.json()["place_of_supply"], "36")
 
@@ -419,6 +425,61 @@ class WalkInPartyStateTests(TestCase):
         self.assertEqual(response.json()["place_of_supply"], "29")
         self.assertEqual(response.json()["supply_type"], "INTER")
 
+    def test_a_NAMED_party_with_a_blank_state_is_REFUSED(self):
+        """
+        The test decision 20 had to drop. A real customer with no state must not
+        silently inherit the business state: that would charge CGST+SGST where
+        IGST was correct - a wrong tax type on a legal document.
+        """
+        named = Party.objects.create(
+            business=self.user.business, name="Suresh Contractor", mobile="9000011111"
+        )
+        self.assertEqual(named.state_code, "")
+        self.assertFalse(named.is_walk_in)
+
+        response = self.client_.post(
+            "/api/v1/invoices/preview/",
+            {"party": named.pk, "items": [line_payload(self.item)]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400, response.content[:300])
+        self.assertEqual(response.json()["error"], "PARTY_STATE_MISSING")
+
+        # Saving is refused too: an invoice whose place of supply is unknown has
+        # no computable total, so there is nothing meaningful to store. The user
+        # fixes the customer's state and the draft goes through.
+        draft = self.client_.post(
+            INVOICE_LIST_URL,
+            {"party": named.pk, "items": [line_payload(self.item)]},
+            format="json",
+        )
+        self.assertEqual(draft.status_code, 400, draft.content[:300])
+        self.assertEqual(draft.json()["error"], "PARTY_STATE_MISSING")
+
+        named.state_code = "29"
+        named.save(update_fields=["state_code"])
+        retry = self.client_.post(
+            INVOICE_LIST_URL,
+            {"party": named.pk, "items": [line_payload(self.item)]},
+            format="json",
+        )
+        self.assertEqual(retry.status_code, 201, retry.content[:300])
+        issued = self.client_.post(issue_url(retry.json()["id"]), {}, format="json")
+        self.assertEqual(issued.status_code, 201, issued.content[:300])
+
+    def test_party_state_missing_is_REACHABLE_again(self):
+        """Pins the specific regression decision 20 introduced."""
+        named = Party.objects.create(
+            business=self.user.business, name="Suresh Contractor", mobile="9000011111"
+        )
+        response = self.client_.post(
+            "/api/v1/invoices/preview/",
+            {"party": named.pk, "items": [line_payload(self.item)]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "PARTY_STATE_MISSING")
+
     def test_nothing_resolvable_still_reports_an_error(self):
         """With no party state AND no business state, the calculator must refuse."""
         self.user.business.state_code = ""
@@ -429,23 +490,6 @@ class WalkInPartyStateTests(TestCase):
             format="json",
         )
         self.assertEqual(response.status_code, 400)
-
-    def test_a_party_with_no_state_falls_back_to_the_business_state(self):
-        """
-        `Party` has no `is_walk_in` column, so the schema cannot separate a
-        walk-in from a named customer who left their state blank. The only rule
-        the data supports - and the one decision 9 asks for - is: fall back to
-        the business state. Supplying a customer standing at your counter from
-        your own state is correct, and the place of supply stays overridable.
-        """
-        draft = self.client_.post(
-            INVOICE_LIST_URL,
-            {"party": self.walk_in.pk, "items": [line_payload(self.item)]},
-            format="json",
-        ).json()
-        response = self.client_.post(issue_url(draft["id"]), {}, format="json")
-        self.assertEqual(response.status_code, 201, response.content[:300])
-        self.assertEqual(response.json()["place_of_supply"], "36")
 
     def test_party_state_missing_is_refused_when_nothing_can_resolve_it(self):
         """With no party state AND no business state, the tax treatment is unknowable."""
@@ -478,6 +522,127 @@ class WalkInPartyStateTests(TestCase):
         self.assertEqual(response.status_code, 201, response.content[:300])
         self.assertEqual(response.json()["place_of_supply"], "29")
         self.assertEqual(response.json()["supply_type"], "INTER")
+
+    def test_a_business_state_change_flows_into_the_next_walk_in_invoice(self):
+        """
+        The walk-in's state is resolved, never stored, so moving the business
+        must change the *next* invoice without touching the walk-in row.
+        """
+        self.user.business.state_code = "29"
+        self.user.business.save(update_fields=["state_code"])
+
+        response = self.client_.post(
+            "/api/v1/invoices/preview/",
+            {"party": self.walk_in.pk, "items": [line_payload(self.item)]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.content[:300])
+        self.assertEqual(response.json()["place_of_supply"], "29")
+        # Still INTRA: a walk-in is supplied from where the shop is, so moving the
+        # shop to Karnataka makes the invoice Karnataka-internal, never inter-state.
+        self.assertEqual(response.json()["supply_type"], "INTRA")
+
+        self.walk_in.refresh_from_db()
+        self.assertEqual(self.walk_in.state_code, "", "the walk-in must store no state")
+
+
+class WalkInProtectionTests(TestCase):
+    """Decision 21: the walk-in is managed by the system, not by the user."""
+
+    def setUp(self):
+        self.user = make_user(state_code="36")
+        self.client_ = api_client_for(self.user)
+        self.walk_in = Party.objects.create(
+            business=self.user.business,
+            name="Walk-in / Cash Customer",
+            mobile="9876543210",
+            is_walk_in=True,
+        )
+
+    def detail(self, pk: int) -> str:
+        return f"/api/v1/parties/{pk}/"
+
+    def test_renaming_the_walk_in_is_refused(self):
+        response = self.client_.patch(
+            self.detail(self.walk_in.pk), {"name": "My Best Customer"}, format="json"
+        )
+        self.assertEqual(response.status_code, 400, response.content[:300])
+        self.walk_in.refresh_from_db()
+        self.assertEqual(self.walk_in.name, "Walk-in / Cash Customer")
+
+    def test_giving_the_walk_in_a_gstin_is_refused(self):
+        response = self.client_.patch(
+            self.detail(self.walk_in.pk), {"gstin": "36AAAAA9999A1Z5"}, format="json"
+        )
+        self.assertEqual(response.status_code, 400, response.content[:300])
+        self.walk_in.refresh_from_db()
+        self.assertEqual(self.walk_in.gstin, "")
+
+    def test_deleting_the_walk_in_is_refused(self):
+        response = self.client_.delete(self.detail(self.walk_in.pk))
+        self.assertEqual(response.status_code, 400, response.content[:300])
+        self.assertEqual(response.json()["error"], "WALK_IN_PROTECTED", response.content[:200])
+        self.walk_in.refresh_from_db()
+        self.assertTrue(self.walk_in.is_active, "the walk-in must not be soft-deleted")
+
+    def test_deactivating_the_walk_in_is_refused(self):
+        response = self.client_.patch(
+            self.detail(self.walk_in.pk), {"is_active": False}, format="json"
+        )
+        self.assertEqual(response.status_code, 400, response.content[:300])
+        self.walk_in.refresh_from_db()
+        self.assertTrue(self.walk_in.is_active)
+
+    def test_the_walk_in_can_still_be_edited_while_its_state_is_blank(self):
+        """
+        The blocker 2.0.2 called out: an unconditional state rule would make the
+        walk-in un-editable the moment the flag existed, because every save of
+        it would fail the state check.
+        """
+        response = self.client_.patch(
+            self.detail(self.walk_in.pk), {"opening_balance": "0.00"}, format="json"
+        )
+        self.assertEqual(response.status_code, 200, response.content[:300])
+
+    def test_a_second_walk_in_is_rejected_by_the_database(self):
+        from django.db import IntegrityError, transaction
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Party.objects.create(
+                    business=self.user.business,
+                    name="Another Walk-in",
+                    mobile="9876543211",
+                    is_walk_in=True,
+                )
+
+    def test_is_walk_in_cannot_be_set_through_the_api(self):
+        response = self.client_.patch(
+            self.detail(self.walk_in.pk), {"is_walk_in": False}, format="json"
+        )
+        self.assertEqual(response.status_code, 200, response.content[:300])
+        self.walk_in.refresh_from_db()
+        self.assertTrue(self.walk_in.is_walk_in, "is_walk_in must not be settable")
+
+    def test_get_or_create_finds_the_walk_in_by_flag_not_by_name(self):
+        """Renaming the row in the database must not break the lookup."""
+        from apps.accounts.services import get_or_create_walk_in_party
+
+        self.walk_in.name = "Cash Sale (renamed in the DB)"
+        self.walk_in.save(update_fields=["name"])
+
+        found = get_or_create_walk_in_party(self.user.business)
+        self.assertEqual(found.pk, self.walk_in.pk)
+        self.assertEqual(
+            Party.objects.filter(business=self.user.business, is_walk_in=True).count(), 1
+        )
+
+    def test_the_two_protection_messages_stay_identical(self):
+        """serializers.py and views.py hold the same string; keep them in step."""
+        from apps.parties.serializers import WALK_IN_SERIALIZER_MESSAGE
+        from apps.parties.views import WALK_IN_PROTECTED_MESSAGE
+
+        self.assertEqual(WALK_IN_SERIALIZER_MESSAGE, WALK_IN_PROTECTED_MESSAGE)
 
 
 class FrozenAfterIssueTests(TestCase):

@@ -45,3 +45,25 @@ def translate(exc: IssueError) -> InvoiceLifecycleError:
     """Map a service-layer `IssueError` onto its API representation."""
     cls = InvoiceConflictError if isinstance(exc, InvoiceConflict) else InvoiceLifecycleError
     return cls(exc.code, exc.message, status_code=exc.status, field=exc.field)
+
+
+def translate_calculation(exc) -> InvoiceLifecycleError:
+    """
+    Map a `GSTCalculationError` onto the same envelope the issue/cancel gates use.
+
+    The calculator refuses with a specific, machine-readable `code`
+    (`PARTY_STATE_MISSING`, `INVALID_TAX_RATE`, ...). Wrapping it in a plain DRF
+    `ValidationError` threw that code away and left the client with a generic
+    `VALIDATION_ERROR`, so the *preview* endpoint reported one error string while
+    *issue* reported another for the identical underlying condition. The code is
+    the contract the frontend branches on, so it has to survive the trip.
+
+    Status stays 400: a refusal to calculate is a bad request, and
+    `InvoiceLifecycleError` defaults to 400. It is used here purely for its
+    `default_code` handling.
+    """
+    return InvoiceLifecycleError(
+        getattr(exc, "code", "GST_CALCULATION_ERROR"),
+        getattr(exc, "message", str(exc)),
+        field=getattr(exc, "field", ""),
+    )

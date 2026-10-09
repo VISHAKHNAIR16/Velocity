@@ -3,12 +3,12 @@
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.urls import reverse
-from rest_framework.test import APITestCase
 
 from apps.parties.models import Party
 
 from .models import BusinessProfile
 from .services import WALK_IN_PARTY_NAME, get_business, get_or_create_walk_in_party
+from .test_base import AccountsTestCase
 
 User = get_user_model()
 STRONG_PASSWORD = "Str0ng!Pass#2026"
@@ -26,7 +26,7 @@ def make_business(email: str, trade_name: str) -> BusinessProfile:
     return make_user(email, trade_name).business
 
 
-class AuthTests(APITestCase):
+class AuthTests(AccountsTestCase):
     def test_register_creates_user_business_and_tokens(self):
         response = self.client.post(
             reverse("register"),
@@ -78,7 +78,7 @@ class AuthTests(APITestCase):
         self.assertEqual(response.data["error"], "NOT_AUTHENTICATED")
 
 
-class ProfileIsolationTests(APITestCase):
+class ProfileIsolationTests(AccountsTestCase):
     """User A must never see or change User B's business."""
 
     def setUp(self):
@@ -123,7 +123,7 @@ class ProfileIsolationTests(APITestCase):
         self.assertEqual(get_business(self.user_b).user_id, self.user_b.id)
 
 
-class InvoicePreferencesTests(APITestCase):
+class InvoicePreferencesTests(AccountsTestCase):
     """Step A: the 1.4 invoice preferences on the business profile."""
 
     def setUp(self):
@@ -181,8 +181,15 @@ class InvoicePreferencesTests(APITestCase):
         self.assertEqual(self.client.get(self.url).data["invoice_number_prefix"], "INV")
 
 
-class WalkInPartyTests(APITestCase):
-    """Step A: one walk-in customer per business, created idempotently."""
+class WalkInPartyTests(AccountsTestCase):
+    """
+    One walk-in customer per business, created idempotently and found by FLAG.
+
+    Decision 21 changed two things this class used to assert:
+      * the walk-in is looked up by `is_walk_in`, not by name;
+      * it stores **no** state - the business state is resolved at invoice time,
+        so a later business-state change cannot leave a stale walk-in behind.
+    """
 
     def test_registration_creates_a_walk_in_party(self):
         response = self.client.post(
@@ -192,17 +199,21 @@ class WalkInPartyTests(APITestCase):
         )
         self.assertEqual(response.status_code, 201)
         user = User.objects.get(email="walk@example.com")
-        walk_in = Party.objects.get(business=user.business, name=WALK_IN_PARTY_NAME)
+        walk_in = Party.objects.get(business=user.business, is_walk_in=True)
+        self.assertEqual(walk_in.name, WALK_IN_PARTY_NAME)
         self.assertEqual(walk_in.party_type, Party.PartyType.CUSTOMER)
         self.assertEqual(walk_in.gstin, "")
         self.assertTrue(walk_in.is_active)
 
-    def test_walk_in_uses_the_business_state_and_valid_mobile(self):
+    def test_the_walk_in_is_flagged_and_stores_no_state(self):
         business = make_business("s@example.com", "State Shop")
         business.state_code = "27"
         business.save(update_fields=["state_code", "updated_at"])
         walk_in = get_or_create_walk_in_party(business)
-        self.assertEqual(walk_in.state_code, "27")
+
+        self.assertTrue(walk_in.is_walk_in)
+        # Decision 21: resolved from the business at invoice time, never stored.
+        self.assertEqual(walk_in.state_code, "")
         self.assertRegex(walk_in.mobile, r"^[6-9][0-9]{9}$")
 
     def test_creating_twice_returns_the_same_party(self):
@@ -210,23 +221,40 @@ class WalkInPartyTests(APITestCase):
         first = get_or_create_walk_in_party(business)
         second = get_or_create_walk_in_party(business)
         self.assertEqual(first.pk, second.pk)
-        self.assertEqual(
-            Party.objects.filter(business=business, name=WALK_IN_PARTY_NAME).count(), 1
-        )
+        self.assertEqual(Party.objects.filter(business=business, is_walk_in=True).count(), 1)
 
-    def test_walk_in_state_is_backfilled_once_the_business_sets_one(self):
+    def test_the_lookup_survives_a_rename(self):
+        """Why it is a flag and not a name lookup."""
+        business = make_business("rename@example.com", "Rename Shop")
+        walk_in = get_or_create_walk_in_party(business)
+        Party.objects.filter(pk=walk_in.pk).update(name="Cash Sale (edited)")
+
+        self.assertEqual(get_or_create_walk_in_party(business).pk, walk_in.pk)
+
+    def test_a_business_state_change_needs_no_walk_in_update(self):
+        """
+        The old behaviour back-filled the walk-in's stored state. Decision 21
+        removed that entirely, so there is nothing left to go stale.
+        """
         business = make_business("late@example.com", "Late Shop")
         business.state_code = ""  # brand-new profile, no state yet
         business.save(update_fields=["state_code", "updated_at"])
         walk_in = get_or_create_walk_in_party(business)
         self.assertEqual(walk_in.state_code, "")
 
-        # The user later completes their profile. The next call tops the walk-in up.
+        # The user later completes their profile.
         business.state_code = "33"
         business.save(update_fields=["state_code", "updated_at"])
-        refreshed = get_or_create_walk_in_party(business)
-        self.assertEqual(refreshed.pk, walk_in.pk)  # same row, not a duplicate
-        self.assertEqual(refreshed.state_code, "33")
+
+        again = get_or_create_walk_in_party(business)
+        self.assertEqual(again.pk, walk_in.pk)
+        again.refresh_from_db()
+        self.assertEqual(again.state_code, "", "the walk-in must still store no state")
+
+        # ...and the next invoice picks up the new state from the business.
+        from apps.invoices.services.draft import resolve_place_of_supply
+
+        self.assertEqual(resolve_place_of_supply(again, [], business), "33")
 
     def test_walk_in_parties_are_scoped_per_tenant(self):
         business_a = make_business("wa@example.com", "Walk A")
@@ -238,10 +266,12 @@ class WalkInPartyTests(APITestCase):
         self.assertEqual(walk_b.business, business_b)
 
 
-class ThrottleConfigTests(APITestCase):
+class ThrottleConfigTests(AccountsTestCase):
     """
-    Throttling is configured globally, and login has its own tighter scope.
-    These prove the config is actually wired, not just present in settings.
+    Throttling is configured globally, and the unauthenticated auth endpoints
+    share one tighter scope. These prove the config is actually wired to views,
+    not merely present in settings - the gap 1.4.9 finding #3 found, where
+    register and refresh had no scope at all.
     """
 
     def test_throttle_classes_are_configured(self):
@@ -250,13 +280,24 @@ class ThrottleConfigTests(APITestCase):
             "rest_framework.throttling.ScopedRateThrottle",
             settings_rf["DEFAULT_THROTTLE_CLASSES"],
         )
-        for scope in ("anon", "user", "login", "preview"):
+        for scope in ("anon", "user", "auth", "login", "preview"):
             self.assertIn(scope, settings_rf["DEFAULT_THROTTLE_RATES"])
 
-    def test_login_view_uses_the_login_scope(self):
-        from apps.accounts.urls import ThrottledTokenObtainPairView
+    def test_every_unauthenticated_auth_endpoint_uses_the_auth_scope(self):
+        from apps.accounts.urls import (
+            AUTH_SCOPE,
+            ThrottledRegisterView,
+            ThrottledTokenObtainPairView,
+            ThrottledTokenRefreshView,
+        )
 
-        self.assertEqual(ThrottledTokenObtainPairView.throttle_scope, "login")
+        for view in (
+            ThrottledRegisterView,
+            ThrottledTokenObtainPairView,
+            ThrottledTokenRefreshView,
+        ):
+            with self.subTest(view=view.__name__):
+                self.assertEqual(view.throttle_scope, AUTH_SCOPE)
 
     def test_repeated_login_attempts_eventually_get_throttled(self):
         """A wrong password repeatedly must start returning 429, not 401 forever."""
@@ -277,7 +318,7 @@ class ThrottleConfigTests(APITestCase):
         self.assertIn(429, statuses, f"never throttled; statuses were {set(statuses)}")
 
 
-class GetBusinessTests(APITestCase):
+class GetBusinessTests(AccountsTestCase):
     def test_creates_missing_profile_exactly_once(self):
         admin = User.objects.create_superuser(email="admin@example.com", password=STRONG_PASSWORD)
         self.assertFalse(BusinessProfile.objects.filter(user=admin).exists())

@@ -42,13 +42,13 @@ const SECTIONS = [
       hint: "1-4 letters or digits. Locked in for the whole financial year once you issue your first invoice, so the series always looks consistent.",
     },
     {
-      name: "hsn_requirement", label: "HSN / SAC requirement", type: "select",
+name: "hsn_min_digits", label: "HSN / SAC digits required", type: "select",
       options: [
-        ["STRICT", "Strict - ask on every line"],
-        ["STATUTORY", "Statutory - only above ₹5,000 to a GSTIN holder"],
+        ["4", "4 digits - annual turnover up to ?5 crore"],
+        ["6", "6 digits - annual turnover above ?5 crore"],
       ],
-      hint: "GST law needs an HSN/SAC code only on a B2B invoice above ₹5,000. Strict asks for one on every line, which over-complies on purpose - confirm with your accountant before switching to Statutory.",
-      warning: "Strict is the safer default: a missing HSN cannot be fixed after the invoice is issued, but an extra one is harmless.",
+      hint: "Every line of every tax invoice needs an HSN/SAC code, and your GSTR-1 asks for a number of digits based on your turnover. 4 digits up to ?5 crore, 6 above.",
+      warning: "If you are unsure which applies, leave this at 4 and ask your accountant. A missing digit is harder to fix after filing than an extra one.",
     },
     {
       name: "round_invoice_total", label: "Round the invoice total", type: "checkbox",

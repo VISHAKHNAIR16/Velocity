@@ -10,6 +10,34 @@ from apps.core.viewsets import TenantModelViewSet
 from .models import Party
 from .serializers import PartyListSerializer, PartySerializer
 
+#: Message used wherever the walk-in refuses an edit (decision 21). One constant
+#: so the API, the tests and the frontend hint can never disagree.
+WALK_IN_PROTECTED_MESSAGE = (
+    "The walk-in / cash customer is managed by Velocity and cannot be renamed, "
+    "given a GSTIN, or deleted. Create a new party for a real customer."
+)
+
+
+def _is_falsy(value) -> bool:
+    """Treat JSON `false`, `"false"` and `"0"` all as False. A form may send any."""
+    if isinstance(value, bool):
+        return value is False
+    if isinstance(value, str):
+        return value.strip().lower() in {"false", "0", "no", "off"}
+    return False
+
+
+def walk_in_protected_response():
+    return Response(
+        {
+            "success": False,
+            "error": "WALK_IN_PROTECTED",
+            "message": WALK_IN_PROTECTED_MESSAGE,
+            "errors": {},
+        },
+        status=status.HTTP_400_BAD_REQUEST,
+    )
+
 
 class PartyViewSet(TenantModelViewSet):
     """
@@ -67,8 +95,27 @@ class PartyViewSet(TenantModelViewSet):
 
     def perform_destroy(self, instance: Party):
         """Soft delete: set is_active=False instead of hard delete."""
+        # The walk-in is not deletable. `get_or_create_walk_in_party()` looks it
+        # up by flag, so deactivating it would just resurrect an unusable row on
+        # the next page load (or leave the counter sale with no party at all).
+        if instance.is_walk_in:
+            return walk_in_protected_response()
         instance.is_active = False
         instance.save(update_fields=["is_active", "updated_at"])
+
+    def destroy(self, request, *args, **kwargs):
+        """Override so `perform_destroy` can refuse instead of silently no-op'ing."""
+        instance = self.get_object()
+        if instance.is_walk_in:
+            return walk_in_protected_response()
+        return super().destroy(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        """Refuse to deactivate the walk-in through PATCH/PUT (a soft delete)."""
+        instance = self.get_object()
+        if instance.is_walk_in and _is_falsy(request.data.get("is_active", True)):
+            return walk_in_protected_response()
+        return super().update(request, *args, **kwargs)
 
     @action(detail=True, methods=["post"])
     def restore(self, request, pk=None):

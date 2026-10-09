@@ -13,12 +13,10 @@ lifecycle stamping and (from 2.1) stock deduction all commit together, so a
 half-issued invoice cannot exist.
 """
 
-from decimal import Decimal
 
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
-from apps.accounts.models import HsnRequirement
 from apps.core.constants import is_hsn, is_sac
 from apps.inventory.models import Item
 
@@ -66,23 +64,45 @@ def check_issue_gates(invoice: Invoice) -> None:
         )
 
     if not resolve_place_of_supply(party, list(invoice.items.all()), business):
-        # Defence in depth. With the business-state fallback added for decision 9
-        # (a party with no state is supplied from the business), this is currently
-        # unreachable: the business-state check above already refuses that case,
-        # which is why the API reports BUSINESS_PROFILE_INCOMPLETE rather than
-        # PARTY_STATE_MISSING. Kept because it is the true statement of what is
-        # required - an unresolvable place of supply is a wrong-tax risk - and it
-        # guards a future change that adds a new way for resolution to fail.
+        # **Reachable again** (decision 21). It was unreachable while decision
+        # 20 let every blank-state party borrow the business state; now only a
+        # party flagged `is_walk_in` may do that, so a normal customer with no
+        # state lands here. This is finding #1 closing: the wrong-tax-type hole
+        # is shut and this gate is live again.
         raise IssueError(
             "PARTY_STATE_MISSING",
-            f"{party.name} has no billing state, and your business profile has no "
-            "state either. One of them decides CGST/SGST vs IGST, so set it "
-            "before issuing.",
+            f"{party.name} has no billing state. Set the customer's state, or "
+            "pick the place of supply manually on the invoice.",
             field="party",
         )
 
-    # HSN/SAC gate.
-    if not _hsn_gate_applies(business, party, invoice):
+    # HSN/SAC gate. Delegates to `_validate_hsn_lines`, which knows the new
+    # digit-count rule (decision 22) and owns the INVOICE_EMPTY check so the
+    # "no lines at all" case is reported before any per-line complaint.
+    _validate_hsn_lines(invoice, business, party)
+
+
+def _validate_hsn_lines(invoice, business, party) -> None:
+    """
+    Every line must carry a usable HSN/SAC, of at least `business.hsn_min_digits`
+    digits (decision 22).
+
+    Two separate failures, because they need different instructions from the user:
+
+    * `HSN_REQUIRED`   - no code at all. Every line needs one.
+    * `HSN_TOO_SHORT`  - a code exists but is less precise than this business's
+      turnover requires (a Rs 5 crore+ business filing 4 digits).
+
+    Replaces decision 18's `STATUTORY` mode, which gated on a per-invoice Rs
+    5,000 threshold. That number is not an HSN rule - it is an old reverse-charge
+    daily limit - and it asked the wrong question ("does this line need a code?")
+    rather than the right one ("how precise must it be?").
+
+    A non-REGULAR business issues a Bill of Supply and stays exempt.
+    """
+    minimum_digits = int(getattr(business, "hsn_min_digits", 4) or 4)
+
+    if business.gst_registration_type != business.GstRegistrationType.REGULAR:
         return
 
     if not invoice.items.exists():
@@ -95,8 +115,8 @@ def check_issue_gates(invoice: Invoice) -> None:
         if not line.hsn_sac_code:
             raise IssueError(
                 "HSN_REQUIRED",
-                f"'{line.item_name}' has no HSN/SAC code. It is mandatory on "
-                "every line of a tax invoice to a GSTIN holder.",
+                f"'{line.item_name}' has no HSN/SAC code. It is required on every "
+                "line of a tax invoice.",
                 field="items",
             )
         is_valid = (
@@ -112,37 +132,15 @@ def check_issue_gates(invoice: Invoice) -> None:
                 f"'{line.hsn_sac_code}'.",
                 field="items",
             )
-
-
-#: GST Notification 12/2017-CT: HSN is required on a B2B invoice only when the
-#: invoice value exceeds Rs 5,000. See `BusinessProfile.hsn_requirement`.
-STATUTORY_HSN_THRESHOLD = Decimal("5000.00")
-
-
-def _hsn_gate_applies(business, party, invoice) -> bool:
-    """
-    Whether this invoice must carry an HSN/SAC on every line.
-
-    Two modes, chosen per business:
-
-    * `STRICT` (default) - always, for a REGULAR business. Deliberately stricter
-      than the statute: over-complying is recoverable, under-complying is not.
-    * `STATUTORY` - only for a B2B invoice above Rs 5,000, i.e. when the
-      recipient has a GSTIN and the total exceeds the threshold.
-
-    A non-REGULAR business issues a Bill of Supply, which carries no HSN
-    requirement, so the gate never applies to one.
-    """
-    if business.gst_registration_type != business.GstRegistrationType.REGULAR:
-        return False
-
-    if business.hsn_requirement == HsnRequirement.STRICT:
-        return True
-
-    # STATUTORY
-    if not party.gstin:
-        return False
-    return invoice.grand_total > STATUTORY_HSN_THRESHOLD
+        if len(line.hsn_sac_code) < minimum_digits:
+            raise IssueError(
+                "HSN_TOO_SHORT",
+                f"'{line.item_name}' has the {len(line.hsn_sac_code)}-digit code "
+                f"'{line.hsn_sac_code}', but your business must report at least "
+                f"{minimum_digits} digits because its annual turnover is above "
+                "Rs 5 crore.",
+                field="items",
+            )
 
 
 # ---------------------------------------------------------------------------

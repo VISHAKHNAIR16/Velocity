@@ -9,6 +9,14 @@ from apps.core.constants import GST_STATE_CHOICES
 
 from .models import Party
 
+#: Same wording as `views.WALK_IN_PROTECTED_MESSAGE`. Duplicated as a literal
+#: rather than imported because views.py imports this module - importing back
+#: would be circular. The test asserts both strings stay identical.
+WALK_IN_SERIALIZER_MESSAGE = (
+    "The walk-in / cash customer is managed by Velocity and cannot be renamed, "
+    "given a GSTIN, or deleted. Create a new party for a real customer."
+)
+
 
 class PartySerializer(serializers.ModelSerializer):
     """Full serializer for Party create/update/retrieve."""
@@ -43,6 +51,7 @@ class PartySerializer(serializers.ModelSerializer):
             "opening_balance",
             "balance_type",
             "is_active",
+            "is_walk_in",
             "display_state",
             "is_registered",
             "billing_address_lines",
@@ -50,7 +59,7 @@ class PartySerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        read_only_fields = ["id", "created_at", "updated_at", "is_walk_in"]
         extra_kwargs = {
             # Not required at the API boundary so a GSTIN-only payload can have its
             # state derived below. validate() still guarantees a state is present.
@@ -131,6 +140,22 @@ class PartySerializer(serializers.ModelSerializer):
         gstin = attrs.get("gstin") or (self.instance.gstin if self.instance else "")
         pan = attrs.get("pan") or (self.instance.pan if self.instance else "")
 
+        # --- Walk-in protection (decision 21) ---
+        # The walk-in is looked up by its `is_walk_in` flag, so renaming it
+        # would not break that lookup - but a renamed "cash customer" is a
+        # contradiction the user cannot undo, and giving it a GSTIN would let
+        # an unregistered counter sale carry a B2B tax identity.
+        if getattr(self.instance, "is_walk_in", False):
+            new_name = attrs.get("name")
+            if new_name is not None and new_name != self.instance.name:
+                raise serializers.ValidationError(
+                    {"name": WALK_IN_SERIALIZER_MESSAGE}
+                )
+            if (attrs.get("gstin") or "").strip():
+                raise serializers.ValidationError(
+                    {"gstin": WALK_IN_SERIALIZER_MESSAGE}
+                )
+
         # Resolve the state: explicit value > derived from the GSTIN > already stored.
         if "state_code" in attrs:
             resolved_state = attrs["state_code"]
@@ -144,7 +169,13 @@ class PartySerializer(serializers.ModelSerializer):
             resolved_state = ""
 
         # A state is mandatory: it decides CGST+SGST vs IGST on every invoice.
-        if not resolved_state:
+        # **Except** for the walk-in (decision 21), whose place of supply is
+        # resolved from the business at invoice time. Making this rule
+        # conditional is not optional - left unconditional, the walk-in would
+        # become un-editable through the API the moment the flag exists,
+        # because every save of it would fail this check.
+        is_walk_in = bool(getattr(self.instance, "is_walk_in", False))
+        if not resolved_state and not is_walk_in:
             raise serializers.ValidationError(
                 {"state_code": "Select the party's state."}
             )

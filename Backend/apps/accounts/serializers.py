@@ -81,7 +81,7 @@ class BusinessProfileSerializer(serializers.ModelSerializer):
             "gst_registration_type",
             "round_invoice_total",
             "invoice_number_prefix",
-            "hsn_requirement",
+            "hsn_min_digits",
             "is_complete",
             "created_at",
             "updated_at",

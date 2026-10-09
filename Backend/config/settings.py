@@ -74,6 +74,11 @@ INSTALLED_APPS = [
     # Phase 1.4: added now (before its models exist) so the Step B calculator
     # and its tests are importable and discoverable.
     "apps.invoices",
+    # Provides OutstandingToken/BlacklistedToken so a refresh token can be
+    # invalidated. Without it a stolen refresh token is valid for its full
+    # lifetime with no way to revoke it, and "sign out of this device" cannot
+    # exist. Requires `rest_framework_simplejwt` in INSTALLED_APPS.
+    "rest_framework_simplejwt.token_blacklist",
 ]
 
 MIDDLEWARE = [
@@ -194,6 +199,11 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "anon": "60/hour",      # unauthenticated (register / login)
         "user": "600/hour",     # signed-in browsing and normal CRUD
+        # Applied to every unauthenticated auth endpoint: login, register and
+        # token refresh. Added in 2.0.5 - `login` and `preview` already had
+        # scopes, but register and refresh had none and fell through to `anon`
+        # (1.4.9 finding #3).
+        "auth": "10/minute",
         "login": "10/minute",   # brute-force protection
         "preview": "120/minute",
     },
@@ -203,6 +213,10 @@ SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
     "ROTATE_REFRESH_TOKENS": True,  # a new refresh token is issued on each refresh
+    # Without this, rotating a refresh token leaves the OLD one valid for its
+    # full 7 days, so a token that should have been retired keeps working - and
+    # "log out everywhere" could never actually invalidate anything.
+    "BLACKLIST_AFTER_ROTATION": True,
 }
 
 

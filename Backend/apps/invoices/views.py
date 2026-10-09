@@ -24,7 +24,7 @@ from apps.accounts.services import get_business
 from apps.core.fiscal import financial_year
 from apps.core.viewsets import TenantModelViewSet
 
-from .api_errors import translate
+from .api_errors import translate, translate_calculation
 from .models import Invoice, InvoiceItem
 from .serializers import (
     InvoiceListSerializer,
@@ -192,7 +192,7 @@ class InvoiceViewSet(TenantModelViewSet):
                 round_invoice_total=invoice.business.round_invoice_total,
             )
         except GSTCalculationError as exc:
-            raise ValidationError({exc.field or "non_field_errors": [exc.message]}) from exc
+            raise translate_calculation(exc) from exc
         return apply_totals(invoice, totals)
 
     def create(self, request, *args, **kwargs):
@@ -294,7 +294,7 @@ class InvoiceViewSet(TenantModelViewSet):
                 round_invoice_total=business.round_invoice_total,
             )
         except GSTCalculationError as exc:
-            raise ValidationError({exc.field or "non_field_errors": [exc.message]}) from exc
+            raise translate_calculation(exc) from exc
 
         return Response(
             {

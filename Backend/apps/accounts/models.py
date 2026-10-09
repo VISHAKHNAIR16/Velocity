@@ -60,6 +60,61 @@ class User(AbstractUser):
         return self.email
 
 
+class UserSession(models.Model):
+    """
+    One logged-in device/browser, so multiple simultaneous logins are visible
+    and revocable.
+
+    **The gap this fills.** SimpleJWT issues a refresh token valid for 7 days.
+    Without the blacklist app there was no way to invalidate one: "logout" only
+    deleted the token from the browser, so a stolen or borrowed refresh token
+    stayed usable for a week with no way to cut it off, and the user had no way
+    to see that they were signed in on three devices at once.
+
+    A session row records the refresh token's `jti`, so revoking a session means
+    blacklisting exactly that one token and leaving other devices signed in.
+
+    Access tokens (30 minutes) cannot be revoked - they are stateless and already
+    issued. Blacklisting the refresh token stops the session being *renewed*, so
+    the practical worst case after a revoke is up to one access-token lifetime.
+    That is the same trade-off every JWT deployment makes; it is stated here so
+    nobody assumes revocation is instant.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="sessions",
+    )
+    #: The refresh token's unique id. SimpleJWT stores the token itself in
+    #: `OutstandingToken`; we only keep the id, so no secret sits in our table.
+    jti = models.CharField(max_length=255, unique=True)
+
+    #: Human-readable, e.g. "Chrome on Windows". Derived from the User-Agent at
+    #: login; never trusted for authorisation, only shown back to the user.
+    device = models.CharField(max_length=150, blank=True, default="")
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.CharField(max_length=400, blank=True, default="")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_used_at = models.DateTimeField(auto_now=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-last_used_at"]
+        indexes = [
+            models.Index(fields=["user", "revoked_at"]),
+            models.Index(fields=["user", "-last_used_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.user_id}: {self.device or 'unknown device'}"
+
+    @property
+    def is_active(self) -> bool:
+        return self.revoked_at is None
+
+
 def logo_upload_path(instance: "BusinessProfile", filename: str) -> str:
     """Store logos as business_logos/<business id>/<random>.<ext> (unique, no user filename)."""
     extension = os.path.splitext(filename)[1].lower()
@@ -96,16 +151,37 @@ invoice_prefix_validator = RegexValidator(
 
 class HsnRequirement(models.TextChoices):
     """
-    How strictly HSN/SAC codes are demanded when issuing an invoice.
+    RETIRED by decision 22 - kept only so the removal migration can name the old
+    values, and so old migrations that referenced them keep importing.
 
-    GST law requires HSN on a B2B invoice only when its value exceeds Rs 5,000.
-    `STRICT` requires it on every line regardless, which over-complies: an
-    under-complied tax invoice cannot be fixed after the fact, while an extra
-    HSN code is harmless. `STATUTORY` implements the threshold literally.
+    The old `STATUTORY` mode encoded a per-invoice Rs 5,000 threshold, which is
+    not an HSN rule: the digit count required depends on the business's own
+    annual turnover, not on an invoice's value or its recipient. See
+    `BusinessProfile.hsn_min_digits`.
     """
 
     STRICT = "STRICT", "Strict - every line"
     STATUTORY = "STATUTORY", "Statutory - above Rs 5,000 to a GSTIN holder"
+
+
+class HsnMinDigits(models.IntegerChoices):
+    """
+    How many digits of HSN/SAC this business must report (decision 22).
+
+    The digits required scale with annual turnover, because GSTR-1 wants detail
+    proportional to how big the taxpayer is:
+
+        up to Rs 5 crore  -> 4 digits
+        above Rs 5 crore  -> 6 digits
+
+    `HSN_4` is the default so an existing business never becomes stricter without
+    a deliberate choice. The direction of the risk is not symmetric: a
+    superfluous digit is harmless, a missing one is an under-complied return that
+    cannot be fixed after filing.
+    """
+
+    HSN_4 = 4, "4 digits (turnover up to Rs 5 crore)"
+    HSN_6 = 6, "6 digits (turnover above Rs 5 crore)"
 
 
 class BusinessProfile(models.Model):
@@ -182,15 +258,14 @@ class BusinessProfile(models.Model):
         validators=[invoice_prefix_validator],
         help_text="1-4 letters/digits used at the start of the invoice number, e.g. INV.",
     )
-    hsn_requirement = models.CharField(
-        max_length=10,
-        choices=HsnRequirement.choices,
-        default=HsnRequirement.STRICT,
+    hsn_min_digits = models.PositiveSmallIntegerField(
+        "HSN/SAC digits required",
+        choices=HsnMinDigits.choices,
+        default=HsnMinDigits.HSN_4,
         help_text=(
-            "STRICT asks for an HSN/SAC code on every line of every tax invoice. "
-            "STATUTORY only requires it above Rs 5,000 to a GSTIN holder, which "
-            "is what the law actually says. STRICT over-complies on purpose - "
-            "confirm with your CA before switching."
+            "How many digits of the HSN/SAC code your GSTR-1 needs. 4 digits up to "
+            "Rs 5 crore annual turnover, 6 digits above. Every line of every tax "
+            "invoice must meet this minimum. Confirm the figure with your CA."
         ),
     )
 

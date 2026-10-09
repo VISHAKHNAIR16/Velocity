@@ -37,9 +37,14 @@ def get_or_create_walk_in_party(business):
     """
     Return this business's walk-in customer, creating it on first use.
 
-    The state code is the business's own state, so an over-the-counter sale is
-    treated as intra-state (CGST + SGST) unless the business overrides it - which
-    matches how counter sales actually work.
+    **Looked up by the `is_walk_in` flag, not by name** (decision 21). Matching
+    on a name breaks the moment a user renames the party, which is exactly the
+    case the "protect it" rule refuses to allow - so name was never a safe key.
+
+    The state is intentionally **left blank**. An over-the-counter sale is
+    supplied from the business's own state, but that state is resolved at
+    invoice time by `resolve_place_of_supply()` rather than stored here, so it
+    can never go stale if the business later moves to a different state.
 
     Idempotent: safe to call on every page load, on registration, and from the
     billing form. Imported lazily to avoid a circular import
@@ -47,23 +52,22 @@ def get_or_create_walk_in_party(business):
     """
     from apps.parties.models import Party
 
-    party, _created = Party.objects.get_or_create(
+    # The `one_walk_in_per_business` partial unique constraint guarantees this
+    # can match at most one row, so a plain filter is safe.
+    existing = Party.objects.filter(business=business, is_walk_in=True).first()
+    if existing is not None:
+        return existing
+
+    party = Party.objects.create(
         business=business,
         name=WALK_IN_PARTY_NAME,
-        defaults={
-            "party_type": Party.PartyType.CUSTOMER,
-            "mobile": WALK_IN_MOBILE,
-            "email": "",
-            "gstin": "",
-            "pan": "",
-            # Falls back to the billing state on an invoice. An unregistered
-            # walk-in must not carry a GSTIN.
-            "state_code": business.state_code or "",
-        },
+        party_type=Party.PartyType.CUSTOMER,
+        mobile=WALK_IN_MOBILE,
+        email="",
+        gstin="",
+        pan="",
+        is_walk_in=True,
+        # Blank on purpose - resolved from the business at invoice time.
+        state_code="",
     )
-    # Keep the walk-in usable: if a previous run created it while the business
-    # had no state, fill the state in now that one is set.
-    if not party.state_code and business.state_code:
-        party.state_code = business.state_code
-        party.save(update_fields=["state_code", "updated_at"])
     return party

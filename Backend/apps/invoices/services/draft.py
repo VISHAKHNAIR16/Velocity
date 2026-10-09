@@ -16,6 +16,7 @@ from apps.core.money import q2, q3
 from apps.inventory.models import Item
 from apps.invoices.models import Invoice, InvoiceItem
 from apps.invoices.services.gst_calculator import (
+    GSTCalculationError,
     InvoiceTotals,
     LineInput,
     calculate_invoice,
@@ -48,23 +49,33 @@ def resolve_place_of_supply(party, lines, business=None) -> str:
     """
     Default place of supply: shipping state for goods, billing state otherwise.
 
-    Decision 9: a party with no billing state of its own - notably the
-    auto-created "Walk-in / Cash Customer" - is treated as being supplied from
-    the business's own state. Without this fallback a walk-in sale is the one
-    invoice type that cannot be created at all, because the walk-in party is
-    created before the business state is known.
+    Decision 9 / 20 / 21. The history matters because this function is where
+    two bugs lived:
 
-    Returns "" only when neither the party nor the business has a state, so the
-    calculator can still raise its own, more specific error.
+    * **Decision 9 was never implemented.** It said "walk-in party state ->
+      business state", but this returned `""` whenever the party had no state,
+      and the auto-created walk-in always has a blank state. Result: `preview`
+      answered `400 "Select a place of supply"` and a walk-in sale - the single
+      most common retail invoice - could not be created at all.
+    * **Decision 20 fixed it too broadly** (finding #1, P0). It let *every*
+      blank-state party borrow the business state, so a real customer who left
+      their state blank silently got CGST+SGST instead of IGST - the exact
+      wrong-tax-type outcome `PARTY_STATE_MISSING` existed to prevent.
+
+    The fallback therefore applies **only when `party.is_walk_in` is True**
+    (decision 21). Everyone else with a blank state gets `""` back, which makes
+    `PARTY_STATE_MISSING` reachable again.
+
+    Returns "" when nothing is resolvable, so the calculator can raise its own,
+    more specific error.
     """
     party_state = getattr(party, "state_code", "") or ""
-    business_state = getattr(business, "state_code", "") or ""
 
-    if not party_state and not business_state:
-        return ""
     if not party_state:
-        # No party state: the business state decides (decision 9).
-        return business_state
+        # Only the walk-in may borrow the business's state.
+        if getattr(party, "is_walk_in", False):
+            return getattr(business, "state_code", "") or ""
+        return ""
 
     return default_place_of_supply(
         billing_state=party_state,
@@ -85,6 +96,25 @@ def compute_totals(
 ) -> InvoiceTotals:
     """Run the calculator. Pure with respect to the database: it only reads rows."""
     resolved_pos = place_of_supply or resolve_place_of_supply(party, lines, business)
+
+    # Name the ACTUAL problem before the calculator raises a generic one.
+    # `calculate_invoice` is deliberately pure - it has no `party` and cannot tell
+    # "the customer's state is blank" from "nothing resolved a place of supply",
+    # so it reports PLACE_OF_SUPPLY_MISSING for both. This wrapper does have the
+    # party, and the two need different instructions from the user: one means
+    # "set the customer's state", the other "pick a place of supply".
+    #
+    # This also makes /preview/ agree with the issue gate, which already reported
+    # PARTY_STATE_MISSING for this same condition (1.4.9 finding #1, P0).
+    if not resolved_pos and not getattr(party, "state_code", ""):
+        raise GSTCalculationError(
+            "PARTY_STATE_MISSING",
+            f"'{getattr(party, 'name', 'This customer')}' has no billing state. "
+            "Set the customer's state, or pick the place of supply manually on "
+            "the invoice.",
+            field="party",
+        )
+
     return calculate_invoice(
         build_line_inputs(lines),
         business_state=business.state_code,

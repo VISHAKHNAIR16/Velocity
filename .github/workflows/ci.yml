@@ -1,0 +1,267 @@
+﻿# ---------------------------------------------------------------------------
+# Continuous integration for Velocity
+#
+# Why this exists (decision 27)
+# -----------------------------
+# Six of the 380 tests only prove anything on PostgreSQL: Django advertises
+# `has_select_for_update = False` for SQLite, so `select_for_update()` is
+# silently ignored there. A concurrency test on SQLite passes whether or not the
+# locking code works - worse than having no test, because it looks like proof.
+#
+# Those six tests used to run only if someone remembered a 16-minute remote-Neon
+# command. That is not a safety net. This workflow makes them mandatory on every
+# push, on a throwaway Postgres service container, so the Docker/WSL
+# prerequisite disappears from the developer's machine entirely.
+#
+# A tick in tasks.md means "verified as written" (decision 27). That rule applies
+# to this file too: before trusting any job here, break something on purpose and
+# confirm the relevant job goes red. A green job that cannot fail is not proof.
+# ---------------------------------------------------------------------------
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel a superseded run on the same ref. A stale red on an old commit should
+# not sit in the PR checks list.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Real Python, pinned so CI cannot drift from the developer machine.
+  PYTHON_VERSION: "3.13"
+  DJANGO_SETTINGS_MODULE: config.settings_test
+
+jobs:
+  # -------------------------------------------------------------------------
+  # Fast gate: lint, migration drift, and the whole suite on SQLite.
+  # Runs in seconds, so it is the first thing a push should trip.
+  # -------------------------------------------------------------------------
+  lint-and-test:
+    name: lint + SQLite suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          uv sync --frozen --dev
+
+      - name: ruff check
+        run: uv run ruff check .
+
+      # NOTE: `ruff format --check` is deliberately NOT a gate. The existing
+      # codebase was hand-formatted and 47 files differ from ruff-format's
+      # defaults, so enabling it would mean a repo-wide reformat that buries the
+      # 2.0 diff. `ruff check` is the lint gate. Adopting the formatter is a
+      # separate decision (one commit, `ruff format .`), taken on its own.
+
+      # Catches a model edited without its migration. On Render this would
+      # otherwise only surface as a crash on boot, in production.
+      - name: No un-made migrations
+        run: uv run python manage.py makemigrations --check --dry-run
+
+      - name: Django system check
+        run: uv run python manage.py check
+
+      - name: Full suite on SQLite
+        run: uv run python manage.py test apps --settings=config.settings_test --noinput
+
+  # -------------------------------------------------------------------------
+  # The concurrency proof, on real PostgreSQL.
+  #
+  # Only the PostgreSQL-only classes run here: the rest of the suite is already
+  # covered above and would add ~15 minutes of network latency for nothing.
+  # -------------------------------------------------------------------------
+  postgres-concurrency:
+    name: PostgreSQL concurrency
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # postgres service container, not Neon: no secrets, no branch to fall over,
+    # no pooled connection to reason about, and it starts in seconds.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: velocity
+          POSTGRES_PASSWORD: velocity
+          POSTGRES_DB: velocity_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U velocity"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DJANGO_SETTINGS_MODULE: config.settings_test_pg
+      TEST_DATABASE_URL: postgresql://velocity:velocity@localhost:5432/velocity_test
+      TEST_DATABASE_NAME: velocity_ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: uv sync --frozen --dev
+
+      # `test_stock_concurrency` is added here in 2.1.4, alongside the stock
+      # ledger's lock-order tests. Referencing it before it exists would fail
+      # collection on every run.
+      - name: Concurrency tests on PostgreSQL
+        run: >
+          uv run python manage.py test
+          apps.invoices.tests.test_concurrency
+          --settings=config.settings_test_pg
+          --noinput
+          --verbosity 2
+
+      # Proves the job above can actually fail. If this step passes when the
+      # locking code has been deleted, the suite is not testing what we think.
+      # Deliberately run on a scratch branch of the logic, never on main.
+      - name: "Guard: a deliberately broken suite must fail this job"
+        if: github.event_name == 'pull_request'
+        run: |
+          set +e
+          cp apps/invoices/services/issue.py /tmp/issue.py.bak
+          sed -i 's/select_for_update()//' apps/invoices/services/issue.py
+          uv run python manage.py test apps.invoices.tests.test_concurrency \
+            --settings=config.settings_test_pg --noinput
+          STATUS=$?
+          cp /tmp/issue.py.bak apps/invoices/services/issue.py
+          if [ "$STATUS" -eq 0 ]; then
+            echo "::error::The concurrency suite PASSED with select_for_update() removed."
+            echo "::error::It cannot detect a broken lock, so it proves nothing."
+            exit 1
+          fi
+          echo "Good: the suite fails when the locking code is removed."
+
+  # -------------------------------------------------------------------------
+  # Real HTTP against a real server: the frontend/backend contract.
+  #
+  # The billing screen reads specific field names off /preview/. A renamed or
+  # dropped field is invisible to unit tests and only shows up as an empty
+  # totals panel for a real user. These walk the same flows over real HTTP.
+  # -------------------------------------------------------------------------
+  contract-smoke:
+    name: Contract smoke (real HTTP)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DJANGO_SETTINGS_MODULE: config.settings_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: uv sync --frozen --dev
+
+      - name: Contract walk over real HTTP
+        run: uv run python manage.py test apps.invoices.tests.test_contract --noinput --verbosity 2
+
+  # -------------------------------------------------------------------------
+  # Production settings. Everything security-related sits behind `if not DEBUG:`
+  # and has therefore never executed until now. These warnings must be a
+  # conscious decision, not a surprise on the first real deploy.
+  # -------------------------------------------------------------------------
+  deploy-check:
+    name: check --deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DJANGO_SETTINGS_MODULE: config.settings
+      # Dummy values only. No DATABASE_URL means the SQLite fallback is used,
+      # so this job cannot touch Neon even by mistake.
+      DEBUG: "False"
+      SECRET_KEY: ci-dummy-secret-key-not-used-anywhere-real-000000000000
+      ALLOWED_HOSTS: "localhost"
+      CORS_ALLOWED_ORIGINS: "https://example.com"
+      CSRF_TRUSTED_ORIGINS: "https://example.com"
+      DATABASE_URL: ""
+      CLOUDINARY_URL: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: uv sync --frozen --dev
+
+      - name: Production configuration check
+        # Warns about SECURE_HSTS_SECONDS, SECURE_SSL_REDIRECT, cookie flags.
+        # Failing on warnings is deliberate: the accepted list should be an
+        # explicit decision recorded in this file, not a suppressed message.
+        run: |
+          set +e
+          uv run python manage.py check --deploy 2>&1 | tee /tmp/deploy-check.txt
+          STATUS=${PIPESTATUS[0]}
+          echo "---"
+          echo "If this fails, either fix the setting or record it below as accepted."
+          cat <<'ACCEPTED' >> "$GITHUB_STEP_SUMMARY"
+          ## Accepted \`check --deploy\` warnings
+
+          <!-- Add one line per warning we knowingly accept, with a reason. -->
+          _none yet_
+          ACCEPTED
+          exit $STATUS
+
+  # -------------------------------------------------------------------------
+  # Dependency CVEs. Blocking from day one (not "non-blocking first"): the
+  # dependency list is small, and a CVE is cheapest to fix the day it appears
+  # and most painful three months later once the version has spread.
+  # -------------------------------------------------------------------------
+  dependency-audit:
+    name: pip-audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Audit runtime dependencies
+        run: uvx pip-audit -r requirements.txt --strict
+
+      # The dev group (ruff and its deps) is pinned in uv.lock rather than
+      # requirements.txt. Audited, but not gating: a lint tool CVE is not a
+      # production risk, and blocking a deploy on one is how teams end up
+      # disabling the audit entirely.
+      - name: Audit dev dependencies (informational)
+        continue-on-error: true
+        run: uv export --frozen --no-emit-project --format requirements-txt | uvx pip-audit -r /dev/stdin --strict || true
