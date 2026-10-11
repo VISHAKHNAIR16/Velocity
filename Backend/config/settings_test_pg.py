@@ -15,8 +15,12 @@ Where the database comes from
 Set `TEST_DATABASE_URL` to a **Neon dev branch** (never the production branch):
 
     # Neon console -> Branches -> create a branch named e.g. `dev-test`
-    # then copy its pooled connection string into Backend/.env as:
-    TEST_DATABASE_URL=postgresql://user:pass@ep-...-pooler.../neondb?sslmode=require
+    # then copy its connection string into Backend/.env as:
+    TEST_DATABASE_URL=postgresql://user:pass@ep-.../neondb?sslmode=require
+
+The Neon console's default copy button gives you the *pooled* endpoint. Paste it
+anyway - `_test_database_url()` below rewrites it to the direct endpoint and
+explains why. Concurrency tests must not go through PgBouncer.
 
 `DATABASE_URL` is deliberately NOT used, so a missing `TEST_DATABASE_URL` cannot
 accidentally point the concurrency tests at real data. `TEST: {"NAME": ...}` is
@@ -57,9 +61,59 @@ if not TEST_DATABASE_URL:
         "production. See the module docstring for the full command."
     )
 
+def _test_database_url() -> str:
+    """
+    Return the URL to test against, refusing to run through a connection pooler.
+
+    `TEST_DATABASE_URL` is nearly always copied from the Neon console, and the
+    console's default button hands you the **pooled** endpoint
+    (`ep-xxx-pooler.region.aws.neon.tech`) - which sits behind PgBouncer in
+    transaction-pooling mode. That is fine for the app and actively harmful for
+    these tests, for two reasons:
+
+    1. `SELECT ... FOR UPDATE` is only safe if the whole transaction stays on one
+       server connection. Poolers reassign connections per transaction, so the
+       row these tests are trying to lock may not be held by the connection that
+       ends up running the next statement. The tests would then be measuring
+       the pooler, not the locking.
+    2. At teardown Django issues `DROP DATABASE`, and PgBouncer keeps idle
+       sessions open to that database, so it fails with
+       `database "test_..." is being accessed by other users`. Every test
+       reports OK and the command still exits non-zero, which is a genuinely
+       confusing failure.
+
+    Neon exposes the direct endpoint under the same name with `-pooler` removed,
+    so derive it rather than making people hunt for a second URL:
+
+        ep-xxx-pooler.region.aws.neon.tech  ->  ep-xxx.region.aws.neon.tech
+    """
+    import re
+    import sys
+
+    url = TEST_DATABASE_URL
+    host = re.search(r"@([^/:?]+)", url)
+    if not host:
+        return url
+    hostname = host.group(1)
+
+    if "-pooler" not in hostname:
+        return url
+
+    direct = url.replace(f"@{hostname}", f"@{hostname.replace('-pooler', '', 1)}")
+    print(
+        "  NOTICE: TEST_DATABASE_URL points at a pooled endpoint; rewriting to the\n"
+        f"          direct endpoint ({hostname} -> "
+        f"{hostname.replace('-pooler', '', 1)}).\n"
+        "          Concurrency tests must not run through PgBouncer (see\n"
+        "          config/settings_test_pg.py::_test_database_url).",
+        file=sys.stderr,
+    )
+    return direct
+
+
 DATABASES = {
     "default": dj_database_url.parse(
-        TEST_DATABASE_URL,
+        _test_database_url(),
         conn_max_age=0,  # never pool across the threaded concurrency tests
     )
 }

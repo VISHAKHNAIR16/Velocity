@@ -23,8 +23,10 @@ from rest_framework.throttling import ScopedRateThrottle
 from apps.accounts.services import get_business
 from apps.core.fiscal import financial_year
 from apps.core.viewsets import TenantModelViewSet
+from apps.inventory.models import Item
+from apps.inventory.services.stock import InsufficientStock, ItemInactive
 
-from .api_errors import translate, translate_calculation
+from .api_errors import translate, translate_calculation, translate_stock
 from .models import Invoice, InvoiceItem
 from .serializers import (
     InvoiceListSerializer,
@@ -41,6 +43,8 @@ from .services.draft import (
 from .services.gst_calculator import GSTCalculationError
 from .services.issue import IssueError, cancel_invoice, issue_invoice
 from .services.numbering import peek_next_number
+from .services.period_rules import assert_period_open, earliest_allowed_date
+from .services.stock_preview import stock_check_for_lines
 
 
 class InvoiceViewSet(TenantModelViewSet):
@@ -190,10 +194,29 @@ class InvoiceViewSet(TenantModelViewSet):
                 invoice_discount=invoice.invoice_discount,
                 prices_include_tax=invoice.prices_include_tax,
                 round_invoice_total=invoice.business.round_invoice_total,
-            )
+)
         except GSTCalculationError as exc:
             raise translate_calculation(exc) from exc
         return apply_totals(invoice, totals)
+
+    def _assert_date_allowed(self, invoice):
+        """
+        Period rule on the draft-save path (decision 23).
+
+        Saving a draft dated into an already-filed period is refused, not just
+        issuing one: a draft sitting in the list for a closed month is a trap -
+        the user comes back to it weeks later and issues it, which is precisely
+        the invisible-in-GSTR-1 mistake the lock exists to prevent.
+
+        Future-dating IS allowed here. Preparing next month's invoice is normal
+        bookkeeping; `FUTURE_DATE` is an issue-time rule.
+        """
+        try:
+            assert_period_open(
+                invoice.business, invoice.invoice_date, allow_future=True
+            )
+        except IssueError as exc:
+            raise translate(exc) from exc
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -207,6 +230,7 @@ class InvoiceViewSet(TenantModelViewSet):
             business=self._business(),
             created_by=request.user if request.user.is_authenticated else None,
         )
+        self._assert_date_allowed(invoice)
         self._save_lines(invoice, items_payload or [])
         self._recalculate(invoice)
 
@@ -222,6 +246,7 @@ class InvoiceViewSet(TenantModelViewSet):
         serializer.is_valid(raise_exception=True)
         items_payload = serializer.validated_data.pop("items", None)
         invoice = serializer.save()
+        self._assert_date_allowed(invoice)
 
         if items_payload is not None:
             self._save_lines(invoice, items_payload)
@@ -314,7 +339,23 @@ class InvoiceViewSet(TenantModelViewSet):
                 "place_of_supply": data.get("place_of_supply")
                 or resolve_place_of_supply(party, lines, business),
                 "document_title": totals.document_title,
+                # Lets the billing form set the date picker's `min` and explain
+                # itself, instead of the user discovering the lock on submit.
+                "earliest_allowed_date": (
+                    earliest_allowed_date(business).isoformat()
+                    if earliest_allowed_date(business)
+                    else None
+                ),
                 "lines": totals.as_dicts(),
+                # Advisory only (tasks.md 2.1.4): a read of current stock with no
+                # lock and no write, so the billing form can warn while typing.
+                # It is deliberately NOT authoritative - between this response and
+                # the issue request another sale may commit, so the only thing
+                # that can refuse an invoice is `reserve_sale` at issue time. The
+                # frontend renders this as "will be rejected" under BLOCK, never
+                # as a promise that it will succeed.
+                "stock_check": stock_check_for_lines(business, lines),
+                "negative_stock_policy": business.negative_stock_policy,
                 "hsn_summary": [
                     {k: (str(v) if isinstance(v, Decimal) else v) for k, v in row.items()}
                     for row in preview_hsn_summary(lines, totals)
@@ -336,14 +377,38 @@ class InvoiceViewSet(TenantModelViewSet):
         """
         invoice = self.get_object()  # 404 for another tenant's invoice
         try:
-            issued, already = issue_invoice(invoice.pk, user=request.user)
+            issued, already, warnings = issue_invoice(invoice.pk, user=request.user)
         except IssueError as exc:
             raise translate(exc) from exc
+        except (InsufficientStock, ItemInactive) as exc:
+            # Stock refusals get the same envelope as every other gate, plus
+            # per-item `details` so the UI can highlight the offending lines
+            # rather than saying only "not enough stock".
+            raise translate_stock(exc) from exc
 
+        body = self.get_serializer(issued).data
+        if warnings:
+            # ALLOW policy: the sale went through with a negative balance, and
+            # the user must be told rather than discovering it at stock-take.
+            names = {
+                warning.item_id: self._item_name(warning.item_id) for warning in warnings
+            }
+            body["stock_warnings"] = [
+                {
+                    "item_id": warning.item_id,
+                    "item_name": names.get(warning.item_id, ""),
+                    "stock_after": str(warning.resulting_balance),
+                }
+                for warning in warnings
+            ]
         return Response(
-            self.get_serializer(issued).data,
+            body,
             status=status.HTTP_200_OK if already else status.HTTP_201_CREATED,
         )
+
+    def _item_name(self, item_id: int) -> str:
+        item = Item.objects.filter(business=self._business(), pk=item_id).first()
+        return item.name if item else ""
 
     @action(detail=True, methods=["post"])
     def cancel(self, request, pk=None):

@@ -51,7 +51,21 @@ name: "hsn_min_digits", label: "HSN / SAC digits required", type: "select",
       warning: "If you are unsure which applies, leave this at 4 and ask your accountant. A missing digit is harder to fix after filing than an extra one.",
     },
     {
-      name: "round_invoice_total", label: "Round the invoice total", type: "checkbox",
+      name: "books_locked_until", label: "Lock books up to", type: "date",
+      hint: "Set this to the last day of the month whose GSTR-1 you have already filed.",
+      warning: "Invoices dated on or before this day cannot be created, issued or cancelled. That is the point - the sanctioned way to fix a filed period is a credit note dated after this date.",
+    },
+{
+        name: "negative_stock_policy", label: "When stock is short", type: "select",
+        options: [
+          ["ALLOW", "Allow it - issue the invoice and go negative"],
+          ["BLOCK", "Block it - refuse the invoice"],
+        ],
+        hint: "Decides what happens when an invoice sells more than you have in stock.",
+        warning: "Most shops' opening stock is wrong on day one, so ALLOW is the default: a billing app that refuses to bill leaves a customer waiting at the counter and pushes you back to a paper bill. Choose BLOCK if you would rather stop and count. Either way every movement is recorded, and you can correct the count with Adjust Stock.",
+      },
+      {
+        name: "round_invoice_total", label: "Round the invoice total", type: "checkbox",
       hint: "Adds a 'Round Off' row so the payable amount is a whole rupee.",
       warning: "Presentation only. This does not change taxable values, CGST/SGST/IGST, or your GSTR-1 figures - only the amount the customer pays.",
     },

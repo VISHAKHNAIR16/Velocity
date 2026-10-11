@@ -309,25 +309,36 @@
   // ===================================================================
   // LINES
   // ===================================================================
-  function addItemLine(item) {
-    state.lines.push({
-      key: `item-${item.id}-${lineKey += 1}`,
-      mode: "item",
-      item: { id: item.id, name: item.name, unit: item.unit, tax_rate: item.tax_rate, item_type: item.item_type },
-      item_name: item.name,
-      item_type: item.item_type,
-      hsn_sac_code: item.hsn_sac_code || "",
-      unit: item.unit || "",
-      quantity: "1.000",
-      unit_price: item.sales_price,
-      line_discount: "0.00",
-      tax_rate: item.tax_rate,
-      preview: null,
-    });
-    renderLines();
-    applyDefaultPlaceOfSupply(state.party);
-    schedulePreview();
-  }
+function addItemLine(item) {
+      state.lines.push({
+        key: `item-${item.id}-${lineKey += 1}`,
+        mode: "item",
+        item: {
+          id: item.id,
+          name: item.name,
+          unit: item.unit,
+          tax_rate: item.tax_rate,
+          item_type: item.item_type,
+          // Kept for the per-line badge. The authoritative answer is still the
+          // server's `stock_check` on the preview - this is what the user sees
+          // before any request has been made.
+          current_stock: item.current_stock,
+          tracks_stock: item.tracks_stock,
+        },
+        item_name: item.name,
+        item_type: item.item_type,
+        hsn_sac_code: item.hsn_sac_code || "",
+        unit: item.unit || "",
+        quantity: "1.000",
+        unit_price: item.sales_price,
+        line_discount: "0.00",
+        tax_rate: item.tax_rate,
+        preview: null,
+      });
+      renderLines();
+      applyDefaultPlaceOfSupply(state.party);
+      schedulePreview();
+    }
 
   function removeLine(key) {
     state.lines = state.lines.filter((l) => l.key !== key);
@@ -352,21 +363,22 @@
     state.lines.forEach((line) => {
       const row = h("tr");
 
-      // --- Item cell: name + HSN/unit, or inline edit inputs for a custom line
-      const nameCell = h("td");
-      if (line.mode === "item") {
-        nameCell.append(h("div", { className: "font-medium text-navy" }, lineLabel(line)));
-        const bits = [line.hsn_sac_code, line.unit].filter(Boolean);
-        if (bits.length) nameCell.append(h("div", { className: "cell-sub" }, bits.join(" · ")));
-      } else {
-        nameCell.append(h("div", { className: "font-medium text-navy" }, line.item_name));
-        const bits = [`${ITEM_TYPE_LABELS[line.item_type] || line.item_type}`, line.hsn_sac_code, line.unit].filter(Boolean);
-        if (bits.length) nameCell.append(h("div", { className: "cell-sub" }, bits.join(" · ")));
-        if (line.service_description) {
-          nameCell.append(h("div", { className: "cell-sub italic" }, line.service_description));
+      // --- Item cell: name + HSN/unit, or the custom-line fields
+        const nameCell = h("td");
+        if (line.mode === "item") {
+          nameCell.append(h("div", { className: "font-medium text-navy" }, lineLabel(line)));
+          const bits = [line.hsn_sac_code, line.unit].filter(Boolean);
+          if (bits.length) nameCell.append(h("div", { className: "cell-sub" }, bits.join(" · ")));
+          nameCell.append(stockBadge(line));
+        } else {
+          nameCell.append(h("div", { className: "font-medium text-navy" }, line.item_name));
+          const bits = [`${ITEM_TYPE_LABELS[line.item_type] || line.item_type}`, line.hsn_sac_code, line.unit].filter(Boolean);
+          if (bits.length) nameCell.append(h("div", { className: "cell-sub" }, bits.join(" · ")));
+          if (line.service_description) {
+            nameCell.append(h("div", { className: "cell-sub italic" }, line.service_description));
+          }
         }
-      }
-      row.append(nameCell);
+        row.append(nameCell);
 
       // --- Quantity: 3dp, because a quantity is not money (1.5 kg, not 1.50)
       row.append(h("td", {}, numberInput(line, "quantity", "0.001", locked)));
@@ -430,9 +442,130 @@
     return input;
   }
 
-  // ===================================================================
-  // PREVIEW - the ONLY source of every computed figure on this page
-  // ===================================================================
+// ===================================================================
+// STOCK BADGES AND WARNINGS (2.1.4)
+// ===================================================================
+
+    /**
+     * Per-line stock availability.
+     *
+     * Three states, and they say different things on purpose:
+     *  - fine:      "42 in stock"
+     *  - short:     amber, "only 3 in stock - this will go to -2"
+     *  - blocked:   red, "this will be rejected" when the business is on BLOCK
+     *
+     * "This will be rejected" is a stronger, more useful claim than a vague
+     * warning, because under BLOCK it is genuinely what will happen - but only
+     * as of this moment. Another sale could commit first and change the answer,
+     * so the wording stays in the conditional and the server still has the final
+     * say at issue time.
+     *
+     * Rows the server returned in `INSUFFICIENT_STOCK.details` are highlighted
+     * regardless of this badge: the server has already looked, so its opinion
+     * outranks a locally computed guess.
+     */
+    function stockBadge(line) {
+      const item = line.item;
+      // No badge at all for untracked items and services: "no warning" and "in
+      // stock" are different claims, and a service supports neither.
+      if (!item || !item.tracks_stock) return h("span");
+      if (item.current_stock === null || item.current_stock === undefined) return h("span");
+
+      if (line.stockError) {
+        return h("div", {
+          className: "mt-1 text-xs font-semibold text-danger",
+          textContent: line.stockError,
+        });
+      }
+
+      const available = Number(item.current_stock);
+      const wanted = Number(line.quantity || 0);
+      const after = Math.round((available - wanted) * 1000) / 1000;
+
+      if (after >= 0) {
+        return h("div", {
+          className: "mt-1 text-xs text-muted",
+          textContent: `${formatQty(available)} ${item.unit || ""} in stock`.trim(),
+        });
+      }
+
+      const blocked = Boolean(line.stockBlocked);
+      return h("div", {
+        className: `mt-1 text-xs font-semibold ${blocked ? "text-danger" : "text-warning"}`,
+        textContent: blocked
+          ? `Only ${formatQty(available)} ${item.unit || ""} - this will be rejected`
+          : `Only ${formatQty(available)} ${item.unit || ""} - stock will go to ${formatQty(after)}`,
+      });
+    }
+
+    /** Stock is Decimal(12,3): show up to 3 decimals, drop pointless zeros. */
+    function formatQty(value) {
+      return Number(value).toFixed(3).replace(/\.?0+$/, "");
+    }
+
+    /**
+     * Fold the server's advisory `stock_check` into the lines.
+     *
+     * Aggregated per item, matching the server: the same item on three lines is
+     * checked as the sum, because three lines of 4 against a stock of 10 look
+     * fine individually and are short by 2 together. A per-line-only badge would
+     * report "fine" for exactly the case worth warning about.
+     */
+    function applyStockCheck(stockCheck) {
+      state.lines.forEach((line) => {
+        delete line.stockError;
+        delete line.stockBlocked;
+      });
+      (stockCheck || []).forEach((check) => {
+        state.lines.forEach((line) => {
+          if (line.mode === "item" && line.item?.id === check.item_id) {
+            if (check.will_be_rejected) {
+              line.stockBlocked = true;
+            } else if (check.will_go_negative) {
+              line.stockError = `Stock will go to ${formatQty(check.stock_after)} ${check.unit || ""}`.trim();
+            }
+          }
+        });
+      });
+    }
+
+    /**
+     * Highlight the lines the server named in `INSUFFICIENT_STOCK.details`.
+     *
+     * The message alone ("only 3 in stock") does not say *which* line, and an
+     * invoice can hold a dozen of them. Pointing at the rows is the difference
+     * between a message the user can act on and one they have to decode.
+     */
+    function applyStockShortage(details) {
+      const byItem = new Map();
+      (details || []).forEach((row) => {
+        if (row && row.item_id !== undefined) byItem.set(Number(row.item_id), row);
+      });
+
+      state.lines.forEach((line) => {
+        delete line.stockError;
+        delete line.stockBlocked;
+        if (line.mode !== "item") return;
+        const row = byItem.get(Number(line.item?.id));
+        if (!row) return;
+        line.stockBlocked = true;
+        const short = Number(row.shortfall ?? 0);
+        line.stockError =
+          `Short by ${formatQty(short)} ${row.unit || line.item?.unit || ""}`.trim();
+      });
+      renderLines();
+    }
+
+    function clearStockShortage() {
+      state.lines.forEach((line) => {
+        delete line.stockError;
+        delete line.stockBlocked;
+      });
+    }
+
+    // ===================================================================
+    // PREVIEW - the ONLY source of every computed figure on this page
+    // ===================================================================
   const schedulePreview = debounce(runPreview, PREVIEW_DEBOUNCE_MS);
 
   async function runPreview() {
@@ -470,15 +603,23 @@
     };
 
     try {
-      const result = await apiRequest("/invoices/preview/", { method: "POST", body: payload });
+      // Throttled? Wait out the window and retry rather than dropping the
+      // totals. `/preview/` is pure calculation, so re-sending it is safe.
+      const result = await withRetryOnThrottle(
+        () => apiRequest("/invoices/preview/", { method: "POST", body: payload }),
+      );
       if (ticket !== previewTicket) return; // a newer keystroke already won
 
-      previewTotals = result;
-      // Attach each line's computed figures for the read-only columns.
-      result.lines.forEach((computed, index) => {
-        if (state.lines[index]) state.lines[index].preview = computed;
-      });
-      renderLines();
+previewTotals = result;
+        // Attach each line's computed figures for the read-only columns.
+        result.lines.forEach((computed, index) => {
+          if (state.lines[index]) state.lines[index].preview = computed;
+        });
+        // A successful preview means the invoice is currently issuable, so any
+        // stale shortage highlight from a previous attempt is out of date.
+        clearStockShortage();
+        applyStockCheck(result.stock_check);
+        renderLines();
       renderTotals();
       renderHsnSummary();
       renderWarnings();
@@ -496,6 +637,21 @@
     block.replaceChildren();
     // A 400 from /preview/ is a real validation message from the server - show
     // its wording rather than inventing a local explanation.
+    if (err.isThrottled) {
+      // Say WHY the numbers are missing and when they will come back. Showing a
+      // bare "something went wrong" here is how a cashier ends up saving an
+      // invoice against figures they never saw.
+      const seconds = err.retryAfter ?? null;
+      block.append(
+        h("p", { className: "text-sm text-danger" },
+          err.message || "Too many requests."),
+        h("p", { className: "mt-1 text-xs text-muted" },
+          seconds
+            ? `Totals will refresh in about ${seconds}s. Nothing has been saved.`
+            : "Totals will refresh when the server accepts the request again. Nothing has been saved."),
+      );
+      return;
+    }
     block.append(h("p", { className: "text-sm text-danger" },
       err.message || "Could not calculate totals."));
   }
@@ -707,13 +863,36 @@
     const button = $("issue-btn");
     button.disabled = true;
     setBusy(button, true, "Issuing…");
-    try {
-      const saved = await saveDraft();
-      const issued = await apiRequest(`/invoices/${saved.id}/issue/`, { method: "POST", body: {} });
-      showToast(`Issued ${issued.display_number}`);
-      window.location.href = "/invoices/index.html";
-    } catch (err) {
-      const hints = {
+try {
+        const saved = await saveDraft();
+        const issued = await apiRequest(`/invoices/${saved.id}/issue/`, { method: "POST", body: {} });
+        showToast(`Issued ${issued.display_number}`);
+
+        // `stock_warnings` only appears when the business is on ALLOW and stock
+        // went negative. It is not an error - the invoice is issued and the
+        // number is spent - but the user must still be told, or the first they
+        // hear of it is a stock count that does not add up. One toast per
+        // affected item rather than one lumped message, so a long list stays
+        // readable.
+        const warnings = issued.stock_warnings || [];
+        warnings.forEach((warning) => {
+          showToast(
+            `${warning.item_name}: stock is now ${formatQty(warning.stock_after)}`,
+            "warning"
+          );
+        });
+
+        window.location.href = "/invoices/index.html";
+      } catch (err) {
+        if (err.code === "INSUFFICIENT_STOCK") {
+          // Point at the offending rows. The message says what is short but not
+          // which line, and the invoice may hold a dozen lines.
+          applyStockShortage(err.details);
+          showToast(err.message, "error");
+          return;
+        }
+        clearStockShortage();
+        const hints = {
         BUSINESS_PROFILE_INCOMPLETE: "Set your business state in Business profile first.",
         PARTY_STATE_MISSING: "This party has no billing state. Set it, then re-issue.",
         HSN_REQUIRED: "Every line needs an HSN/SAC code. Add them, then issue.",
@@ -969,6 +1148,51 @@
     });
   }
 
-  wireEvents();
-  boot();
-})();
+// ===================================================================
+// TEST SEAMS (2.1.4)
+//
+// Thin wrappers that drive the *real* functions above against a supplied state
+// and return what a test needs to assert on. They exist because `node --check`
+// only proves the file parses: every bug worth catching in this UI is a wording
+// or wiring bug ("in stock" when stock is short, a highlight on the wrong line,
+// "NaN" on screen), and all of those parse perfectly.
+//
+// They add no behaviour and are not reachable from the page: nothing in the UI
+// calls them, and they only read the functions above.
+// ===================================================================
+    window.__testRenderStockBadge = (line) => stockBadge(line);
+    window.__testApplyStockCheck = ({ stock_check, lines }) => {
+      const saved = state.lines;
+      state.lines = lines;
+      try {
+        applyStockCheck(stock_check);
+        const flagged = state.lines.filter((l) => l.stockError || l.stockBlocked);
+        return {
+          warned: flagged.length,
+          example: flagged.length ? stockBadge(flagged[0]).textContent : "",
+        };
+      } finally {
+        state.lines = saved;
+      }
+    };
+    window.__testApplyShortage = ({ details, lines }) => {
+      const saved = state.lines;
+      state.lines = lines;
+      try {
+        applyStockShortage(details);
+        const messages = {};
+        state.lines.forEach((line) => {
+          if (line.stockError) messages[line.item.id] = line.stockError;
+        });
+        return {
+          flagged: Object.keys(messages).map(Number).sort((a, b) => a - b),
+          messages,
+        };
+      } finally {
+        state.lines = saved;
+      }
+    };
+
+    wireEvents();
+    boot();
+  })();

@@ -27,7 +27,7 @@ from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
-from django.test import LiveServerTestCase, TransactionTestCase
+from django.test import LiveServerTestCase, TransactionTestCase, tag
 
 from apps.accounts.models import BusinessProfile
 from apps.inventory.models import Item
@@ -123,6 +123,19 @@ class HttpClient:
         return body
 
 
+# Tagged `contract` because it is 10 tests that take ~54s - about 86% of the
+# entire 63-second suite. Everything else (676 tests) runs in about 9 seconds.
+#
+# The cost is the `LiveServerTestCase` machinery, not the HTTP calls: each test
+# commits (so the database is flushed and fixtures rebuilt), and a real socket
+# server is handled on its own thread with its own connection. `TransactionTestCase`
+# without a live server - `UnauthenticatedAccessTests` below - costs 0.028s for
+# its seven tests, so the server thread is the whole difference.
+#
+# The suite therefore runs with `--exclude-tag=contract`, and CI has a dedicated
+# `contract-smoke` job that runs exactly this class. Do not "fix" the duplicated
+# run by deleting this tag: coverage would be lost, not just time.
+@tag("contract")
 class ContractWalkTests(LiveServerTestCase):
     """
     LiveServerTestCase (not TestCase) because a real socket server is needed.

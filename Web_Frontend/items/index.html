@@ -52,6 +52,7 @@
           <select id="stock-filter" class="input mt-1" aria-label="Filter by stock level">
             <option value="">All Items</option>
             <option value="low">Low stock only</option>
+            <option value="negative">Below zero only</option>
           </select>
         </div>
 
@@ -259,24 +260,71 @@
 
         <div class="border-t border-line pt-6"></div>
 
-        <!-- Stock (products only) -->
-        <section id="stock-section">
-          <h3 class="text-xs font-semibold text-muted uppercase tracking-wider mb-4">Stock</h3>
-          <div class="grid sm:grid-cols-2 gap-4">
-            <div>
-              <label for="f-current_stock" class="label">Quantity in Stock</label>
-              <input id="f-current_stock" name="current_stock" type="text" inputmode="decimal" data-decimal autocomplete="off" class="input" placeholder="0.000" />
-              <p class="hint">Up to 3 decimals, e.g. 1.500 kg.</p>
-              <p data-error-for="current_stock" class="field-error"></p>
+<!-- Stock (products only) -->
+          <section id="stock-section">
+            <h3 class="text-xs font-semibold text-muted uppercase tracking-wider mb-4">Stock</h3>
+
+            <!-- Track stock toggle -->
+            <label class="flex items-start gap-3 mb-4" for="f-track_stock">
+              <input id="f-track_stock" name="track_stock" type="checkbox"
+                     class="mt-1 h-4 w-4 rounded border-line text-navy focus:ring-navy" />
+              <span>
+                <span class="label !mb-0">Track stock for this item</span>
+                <span class="hint block">
+                  Every sale then writes a row to the stock ledger, and stock can no
+                  longer be typed in by hand.
+                </span>
+              </span>
+            </label>
+            <p data-error-for="track_stock" class="field-error"></p>
+
+            <div class="grid sm:grid-cols-2 gap-4">
+              <div>
+                <label for="f-current_stock" class="label" id="current-stock-label">Opening Stock</label>
+                <input id="f-current_stock" name="current_stock" type="text" inputmode="decimal" data-decimal autocomplete="off" class="input" placeholder="0.000" />
+                <p class="hint" id="current-stock-hint">Count what is on the shelf now.</p>
+                <p data-error-for="current_stock" class="field-error"></p>
+              </div>
+              <div>
+                <label for="f-low_stock_threshold" class="label">Low-Stock Alert At</label>
+                <input id="f-low_stock_threshold" name="low_stock_threshold" type="text" inputmode="decimal" data-decimal autocomplete="off" class="input" placeholder="0.000" />
+                <p class="hint">Leave empty to disable the alert.</p>
+                <p data-error-for="low_stock_threshold" class="field-error"></p>
+              </div>
             </div>
-            <div>
-              <label for="f-low_stock_threshold" class="label">Low-Stock Alert At</label>
-              <input id="f-low_stock_threshold" name="low_stock_threshold" type="text" inputmode="decimal" data-decimal autocomplete="off" class="input" placeholder="0.000" />
-              <p class="hint">Leave empty to disable the alert.</p>
-              <p data-error-for="low_stock_threshold" class="field-error"></p>
+
+            <!-- Unit lock (2.0.6): changing unit once history exists would
+                 silently reinterpret every past movement. -->
+            <div id="unit-locked-note" class="hidden mt-4 rounded-lg bg-warning/10 border border-warning/30 p-3">
+              <p class="text-sm text-navy">
+                <span class="font-semibold">Unit is locked.</span>
+                This item already has stock movements, so its unit can no longer
+                be changed. Use <em>Adjust stock</em> for corrections.
+              </p>
             </div>
-          </div>
-        </section>
+          </section>
+
+          <!-- Read-only stock panel (edit mode, tracked items) -->
+          <section id="stock-readonly-panel" class="hidden">
+            <h3 class="text-xs font-semibold text-muted uppercase tracking-wider mb-4">Stock</h3>
+            <div class="rounded-lg border border-line bg-tint/40 p-4 mb-4">
+              <p class="label !mb-1">Current Stock</p>
+              <p class="text-2xl font-bold tabular-nums text-navy" id="ro-current-stock">0</p>
+              <p class="hint mt-1" id="ro-low-stock-hint"></p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <button type="button" id="btn-adjust-stock" class="btn btn-secondary">
+                Adjust Stock
+              </button>
+              <button type="button" id="btn-stock-history" class="btn btn-ghost">
+                Stock History
+              </button>
+            </div>
+            <p class="hint mt-3">
+              Stock changes only through invoices and adjustments, so every change
+              is recorded and can be traced back to its source.
+            </p>
+          </section>
       </form>
 
       <footer class="flex justify-end gap-3 p-4 border-t border-line flex-shrink-0 bg-tint/50">
@@ -286,8 +334,27 @@
     </div>
   </div>
 
-  <!-- Delete Confirmation -->
-  <div id="confirm-dialog" class="fixed inset-0 z-50 hidden" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title">
+<!-- Negative-stock banner (2.1.4): shown when the business is ALLOW and at
+         least one tracked item has gone below zero. -->
+    <div id="negative-stock-banner" class="hidden mb-4 rounded-xl border border-danger/30 bg-danger/5 p-4"
+         role="status">
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <h3 class="text-sm font-semibold text-danger">Some items are below zero</h3>
+          <p class="text-sm text-muted mt-1" id="negative-stock-text"></p>
+        </div>
+        <div class="flex gap-2 flex-shrink-0">
+          <button type="button" id="btn-show-negative" class="btn btn-ghost !py-1 !px-3 text-xs">
+            Show them
+          </button>
+          <button type="button" id="dismiss-negative" class="text-muted hover:text-navy"
+                  aria-label="Dismiss">&times;</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Delete Confirmation -->
+    <div id="confirm-dialog" class="fixed inset-0 z-50 hidden" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title">
     <div class="fixed inset-0 bg-navy/30" id="confirm-backdrop"></div>
     <div class="fixed inset-0 flex items-center justify-center p-4">
       <div class="bg-surface rounded-xl shadow-xl max-w-md w-full p-6">
@@ -301,7 +368,131 @@
     </div>
   </div>
 
-  <script src="/shared/js/config.js"></script>
+  <!-- Adjust Stock modal -->
+    <div id="adjust-dialog" class="fixed inset-0 z-50 hidden" role="dialog" aria-modal="true"
+         aria-labelledby="adjust-title">
+      <div class="fixed inset-0 bg-navy/30" data-adjust-close></div>
+      <div class="fixed inset-0 flex items-center justify-center p-4">
+        <div class="bg-surface rounded-xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+          <div class="p-6 border-b border-line">
+            <h3 id="adjust-title" class="text-lg font-semibold text-navy">Adjust stock</h3>
+            <p class="text-sm text-muted mt-1" id="adjust-item-name"></p>
+          </div>
+
+          <div class="p-6">
+            <!-- Before -> after, so the effect is visible before saving. -->
+            <div class="rounded-lg bg-tint/50 border border-line p-3 mb-5 flex items-center justify-between">
+              <div>
+                <p class="text-xs text-muted uppercase tracking-wider">Current</p>
+                <p class="text-lg font-bold tabular-nums text-navy" id="adjust-before">0</p>
+              </div>
+              <svg class="w-5 h-5 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/>
+              </svg>
+              <div class="text-right">
+                <p class="text-xs text-muted uppercase tracking-wider">After</p>
+                <p class="text-lg font-bold tabular-nums" id="adjust-after">0</p>
+              </div>
+            </div>
+
+            <fieldset class="mb-4">
+              <legend class="label">How should the quantity change?</legend>
+              <div class="flex gap-4 mt-2">
+                <label class="flex items-center gap-2 text-sm">
+                  <input type="radio" name="adjust_mode" value="CHANGE" checked
+                         class="h-4 w-4 border-line text-navy focus:ring-navy" />
+                  Change by
+                </label>
+                <label class="flex items-center gap-2 text-sm">
+                  <input type="radio" name="adjust_mode" value="SET"
+                         class="h-4 w-4 border-line text-navy focus:ring-navy" />
+                  Set to
+                </label>
+              </div>
+            </fieldset>
+
+            <div class="mb-4">
+              <label for="adjust-quantity" class="label" id="adjust-quantity-label">Change by</label>
+              <input id="adjust-quantity" type="text" inputmode="decimal" autocomplete="off"
+                     class="input" placeholder="e.g. -2 for a breakage" />
+              <p class="hint" id="adjust-quantity-hint">Use a negative number to reduce stock.</p>
+              <p class="field-error" id="adjust-error"></p>
+            </div>
+
+            <div class="mb-4">
+              <label for="adjust-reason" class="label">Reason</label>
+              <select id="adjust-reason" class="input">
+                <option value="COUNT_CORRECTION">Stock count correction</option>
+                <option value="DAMAGED">Damaged or expired</option>
+                <option value="THEFT">Loss or theft</option>
+                <option value="RETURN">Customer return</option>
+                <option value="OPENING_CORRECTION">Opening balance correction</option>
+                <option value="OTHER">Other</option>
+              </select>
+              <p class="hint">The reason is stored on the ledger row and cannot be edited later.</p>
+            </div>
+
+            <div>
+              <label for="adjust-note" class="label">Note <span class="text-muted font-normal">(optional)</span></label>
+              <input id="adjust-note" type="text" maxlength="255" autocomplete="off" class="input"
+                     placeholder="e.g. Monthly physical count, 28 Sep" />
+            </div>
+          </div>
+
+          <div class="flex justify-end gap-3 p-4 border-t border-line bg-tint/50">
+            <button type="button" class="btn btn-ghost" data-adjust-close>Cancel</button>
+            <button type="button" id="adjust-save" class="btn btn-primary">Record Adjustment</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Stock History drawer -->
+    <div id="history-drawer" class="fixed inset-0 z-40 hidden" role="dialog" aria-modal="true"
+         aria-labelledby="history-title">
+      <div class="fixed inset-0 bg-navy/30" data-history-close></div>
+      <div class="drawer-panel ml-auto h-full w-full max-w-lg bg-surface shadow-xl flex flex-col">
+        <header class="flex items-start justify-between p-5 border-b border-line flex-shrink-0">
+          <div>
+            <h2 id="history-title" class="text-lg font-semibold text-navy">Stock history</h2>
+            <p class="text-sm text-muted" id="history-item-name"></p>
+          </div>
+          <button type="button" data-history-close class="text-muted hover:text-navy"
+                  aria-label="Close history">&times;</button>
+        </header>
+
+        <div class="p-5 border-b border-line flex-shrink-0">
+          <div class="flex flex-wrap gap-2 items-end">
+            <div class="flex-1 min-w-[8rem]">
+              <label for="history-type" class="label">Type</label>
+              <select id="history-type" class="input">
+                <option value="">All movements</option>
+                <option value="OPENING">Opening</option>
+                <option value="SALE">Sale</option>
+                <option value="SALE_REVERSAL">Sale reversal</option>
+                <option value="ADJUSTMENT">Adjustment</option>
+                <option value="TRACKING_ON">Tracking enabled</option>
+                <option value="TRACKING_OFF">Tracking disabled</option>
+              </select>
+            </div>
+            <div class="flex-1 min-w-[8rem]">
+              <label for="history-from" class="label">From</label>
+              <input id="history-from" type="date" class="input" />
+            </div>
+            <div class="flex-1 min-w-[8rem]">
+              <label for="history-to" class="label">To</label>
+              <input id="history-to" type="date" class="input" />
+            </div>
+          </div>
+        </div>
+
+        <div id="history-body" class="flex-1 overflow-y-auto p-5"></div>
+
+        <footer id="history-footer" class="p-4 border-t border-line text-sm text-muted flex-shrink-0"></footer>
+      </div>
+    </div>
+
+    <script src="/shared/js/config.js"></script>
   <script src="/shared/js/api.js"></script>
   <script src="/shared/js/ui.js"></script>
   <script src="/items/items.js"></script>

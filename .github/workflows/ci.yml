@@ -1,4 +1,4 @@
-﻿# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # Continuous integration for Velocity
 #
 # Why this exists (decision 27)
@@ -90,6 +90,14 @@ jobs:
         run: |
           uv sync --frozen --dev
 
+      - name: Frontend tests (2.1.4)
+        working-directory: Web_Frontend
+        run: |
+          # `npm ci` installs exactly what package-lock.json pins, so a green run
+          # here means the same thing tomorrow. jsdom is the only dependency.
+          npm ci --no-audit --no-fund
+          npm test
+
       - name: ruff check
         run: uv run ruff check .
 
@@ -107,8 +115,21 @@ jobs:
       - name: Django system check
         run: uv run python manage.py check
 
+      # `--exclude-tag=contract` is not an optimisation, it is removing a
+      # duplicate. The 9 `ContractWalkTests` are real-HTTP `LiveServerTestCase`
+      # tests costing ~54s - 86% of the suite - and the `contract-smoke` job
+      # below already runs them on every push. Running them here too meant
+      # paying for them twice on every commit.
+      #
+      # Measured: 686 tests in 63s -> 677 tests in 9s. Same coverage, because
+      # the dedicated job runs the excluded ones. Measured on this repo, not
+      # estimated - see apps/invoices/tests/test_contract.py for the tag's note.
       - name: Full suite on SQLite
-        run: uv run python manage.py test apps --settings=config.settings_test --noinput
+        run: >
+          uv run python manage.py test apps
+          --settings=config.settings_test
+          --noinput
+          --exclude-tag=contract
 
   # -------------------------------------------------------------------------
   # The concurrency proof, on real PostgreSQL.
@@ -154,13 +175,14 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen --dev
 
-      # `test_stock_concurrency` is added here in 2.1.4, alongside the stock
-      # ledger's lock-order tests. Referencing it before it exists would fail
-      # collection on every run.
+      # `apps.inventory.tests_stock_concurrency` (2.1.4) runs here too. It needs a
+      # pool-free connection for the same reason the invoice tests do, and CI's
+      # postgres:16 service is already direct.
       - name: Concurrency tests on PostgreSQL
         run: >
           uv run python manage.py test
           apps.invoices.tests.test_concurrency
+          apps.inventory.tests_stock_concurrency
           --settings=config.settings_test_pg
           --noinput
           --verbosity 2
@@ -207,6 +229,47 @@ jobs:
           fi
           echo "Good: the suite fails when the locking code is removed."
 
+      # Second guard, for the stock ledger (2.1.4).
+      #
+      # The invoice guard above would NOT catch a broken stock lock: it only
+      # mutates `issue.py`. And the behavioural stock race tests alone are not
+      # enough either - verified locally against Neon, with `select_for_update()`
+      # removed from `_lock_items`, the last-unit race test still passed, because
+      # three threads rarely collide inside the few hundred microseconds between
+      # the stock check and the write. A race test that only catches the bug one
+      # run in twenty is a race test that gets deleted after the first green run.
+      #
+      # This guard fails on `LockIsActuallyRequestedTests`, which asserts the SQL
+      # Django really sends contains FOR UPDATE - deterministic, not luck.
+      # Verified locally: this mutation fails 3 of the 14 stock concurrency tests.
+      - name: "Guard: the stock suite must also detect an unlocked ledger"
+        if: github.event_name == 'pull_request'
+        run: |
+          set +e
+          TARGET=apps/inventory/services/stock.py
+          cp "$TARGET" /tmp/stock.py.bak
+
+          sed -i 's/select_for_update()/all()/g' "$TARGET"
+
+          if ! uv run python -c "import ast;ast.parse(open('$TARGET').read())"; then
+            cp /tmp/stock.py.bak "$TARGET"
+            echo "::error::The stock mutation produced a SyntaxError - the guard is broken."
+            exit 1
+          fi
+
+          uv run python manage.py test apps.inventory.tests_stock_concurrency \
+            --settings=config.settings_test_pg --noinput
+          STATUS=$?
+
+          cp /tmp/stock.py.bak "$TARGET"
+
+          if [ "$STATUS" -eq 0 ]; then
+            echo "::error::The stock concurrency suite PASSED with select_for_update() removed."
+            echo "::error::It cannot detect a broken stock lock, so it proves nothing."
+            exit 1
+          fi
+          echo "Good: the stock suite fails when the ledger locking is removed."
+
   # -------------------------------------------------------------------------
   # Real HTTP against a real server: the frontend/backend contract.
   #
@@ -234,8 +297,17 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen --dev
 
+      # `--tag=contract` runs exactly the set the main suite excludes, rather than
+      # the whole module. The module also holds one fast in-process test that
+      # the main suite already covers; selecting the tag keeps the two jobs
+      # complementary instead of overlapping.
       - name: Contract walk over real HTTP
-        run: uv run python manage.py test apps.invoices.tests.test_contract --noinput --verbosity 2
+        run: >
+          uv run python manage.py test apps.invoices.tests.test_contract
+          --settings=config.settings_test
+          --noinput
+          --verbosity 2
+          --tag=contract
 
   # -------------------------------------------------------------------------
   # Production settings. Everything security-related sits behind `if not DEBUG:`

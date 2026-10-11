@@ -83,6 +83,9 @@ class UserSession(models.Model):
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
+        # CASCADE is correct here: a session is authentication bookkeeping, not
+        # a business or accounting record, so removing it with the user loses
+        # nothing. Every FK that carries real records is PROTECT (2.0.10).
         on_delete=models.CASCADE,
         related_name="sessions",
     )
@@ -164,6 +167,24 @@ class HsnRequirement(models.TextChoices):
     STATUTORY = "STATUTORY", "Statutory - above Rs 5,000 to a GSTIN holder"
 
 
+class NegativeStockPolicy(models.TextChoices):
+    """
+    What to do when a sale exceeds the recorded stock (decision 33).
+
+    `ALLOW` is the default on purpose. Most shops' opening stock is wrong on day
+    one; an app that refuses to bill leaves a customer waiting at the counter and
+    pushes the shopkeeper back to a paper bill, which is worse for the books than
+    a temporarily negative count. `BLOCK` is one setting away for anyone who
+    wants it.
+
+    This is a per-business setting rather than a global default because it is a
+    shop-owner judgement call, not a policy we can decide for them.
+    """
+
+    ALLOW = "ALLOW", "Allow - record the sale and flag it"
+    BLOCK = "BLOCK", "Block - refuse to issue if stock is short"
+
+
 class HsnMinDigits(models.IntegerChoices):
     """
     How many digits of HSN/SAC this business must report (decision 22).
@@ -191,7 +212,13 @@ class BusinessProfile(models.Model):
     """
 
     user = models.OneToOneField(
-        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="business"
+        # PROTECT, not CASCADE (2.0.10). Deleting the User would otherwise take
+        # the business with it, and from there `TenantModel.business` (PROTECT)
+        # would block - or worse, before 2.0.10, cascade away every invoice.
+        # Closing an account is deactivating the user and exporting the data.
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="business",
     )
 
     # --- Identity (matches the profile screen) ---
@@ -266,6 +293,33 @@ class BusinessProfile(models.Model):
             "How many digits of the HSN/SAC code your GSTR-1 needs. 4 digits up to "
             "Rs 5 crore annual turnover, 6 digits above. Every line of every tax "
             "invoice must meet this minimum. Confirm the figure with your CA."
+        ),
+    )
+
+    # --- Books lock (decision 23) -----------------------------------------
+    # Until the user sets this, `None` means "nothing is locked" and the date
+    # rules are inert, so an existing business is unaffected by adding it.
+    negative_stock_policy = models.CharField(
+        max_length=5,
+        choices=NegativeStockPolicy.choices,
+        default=NegativeStockPolicy.ALLOW,
+        help_text=(
+            "What to do when a sale would take stock below zero. Allow records "
+            "the sale and flags it; Block refuses to issue the invoice. Allow is "
+            "the default because most shops' opening stock is wrong on day one, "
+            "and an app that refuses to bill loses the sale."
+        ),
+    )
+
+    books_locked_until = models.DateField(
+        "books locked up to",
+        null=True,
+        blank=True,
+        help_text=(
+            "Set this to the last day of the month whose GSTR-1 you have already "
+            "filed. Invoices dated on or before this day cannot be created, "
+            "issued or cancelled - the sanctioned way to correct a filed period "
+            "is a credit note dated after this date."
         ),
     )
 

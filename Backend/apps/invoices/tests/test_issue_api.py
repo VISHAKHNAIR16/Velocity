@@ -756,14 +756,26 @@ class IssueTenantIsolationTests(TestCase):
 
 
 class FinancialYearIssueTests(TestCase):
+    """
+    FY rollover, expressed in dates that are actually issuable.
+
+    Decision 23 now refuses a future-dated invoice at issue (`FUTURE_DATE`), so
+    the original four-point walk could not reach 2027 dates. The FY boundary is
+    a property of *numbering*, so it is pinned twice: end-to-end over the API
+    for the boundary the current date can reach, and directly against the
+    numbering service for the later one. The API test that a future date is
+    refused lives in `PeriodLockTests`.
+    """
+
     def test_financial_year_rollover_on_issue(self):
         user = make_user()
         client_ = api_client_for(user)
         party = make_party(user)
         item = make_item(user)
 
+        # Both sides of the 1 April boundary, in the past relative to any run.
         numbers = []
-        for invoice_date in ("2026-03-31", "2026-04-01", "2027-03-31", "2027-04-01"):
+        for invoice_date in ("2025-04-15", "2026-03-31", "2026-04-01"):
             draft = client_.post(
                 INVOICE_LIST_URL,
                 {
@@ -781,10 +793,24 @@ class FinancialYearIssueTests(TestCase):
             numbers,
             [
                 "INV/25-26/00001",
-                "INV/26-27/00001",
-                "INV/26-27/00002",
-                "INV/27-28/00001",
+                "INV/25-26/00002",   # last day of the same FY
+                "INV/26-27/00001",   # first day of the next FY
             ],
+        )
+
+    def test_the_later_fy_boundary_is_numbered_correctly(self):
+        """Numbering is pure, so it can be checked for dates the clock hasn't reached."""
+        from datetime import date as _date
+
+        from apps.invoices.services.numbering import peek_next_number
+
+        user = make_user()
+        business = user.business
+        self.assertEqual(
+            peek_next_number(business, _date(2027, 3, 31)), "INV/26-27/00001"
+        )
+        self.assertEqual(
+            peek_next_number(business, _date(2027, 4, 1)), "INV/27-28/00001"
         )
 
     def test_the_fy_comes_from_the_invoice_date_not_today(self):

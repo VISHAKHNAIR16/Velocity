@@ -23,13 +23,24 @@ const Auth = {
 
 /** Error thrown for every failed API call (matches the backend error format). */
 class ApiError extends Error {
-  constructor(status, code, message, errors = {}) {
-    super(message);
-    this.status = status;
-    this.code = code;
-    this.errors = errors; // {field: ["message", ...]} for validation errors
+    constructor(status, code, message, errors = {}, retryAfter = null, details = null) {
+      super(message);
+      this.status = status;
+      this.code = code;
+      this.errors = errors; // {field: ["message", ...]} for validation errors
+      // Seconds the server asked us to wait (decision 24). `null` when it did not
+      // say - the caller must not assume "retry immediately".
+      this.retryAfter = retryAfter;
+      this.isThrottled = status === 429;
+      // `details` is the structured, per-row payload some endpoints attach
+      // alongside `message` - notably 2.1.4's INSUFFICIENT_STOCK, which lists
+      // which items are short and by how much. It is deliberately separate from
+      // `errors`: `errors` maps to form fields, while `details` describes rows
+      // the user has to look at on the invoice, and folding one into the other
+      // loses the distinction the UI needs to highlight the right lines.
+      this.details = Array.isArray(details) ? details : null;
+    }
   }
-}
 
 /** One raw fetch with timeout. Returns {response, data}; throws ApiError if unreachable. */
 async function send(path, method, body, token) {
@@ -92,7 +103,52 @@ async function apiRequest(path, { method = "GET", body, auth = true } = {}) {
 
   if (!result.response.ok) {
     const d = result.data;
-    throw new ApiError(result.response.status, d.error || "ERROR", d.message || "Something went wrong.", d.errors || {});
+    // 429 carries `retry_after` in the body and `Retry-After` in the header
+    // (decision 24). Read the body first, fall back to the header, and cap it so
+    // a hostile or buggy value cannot hang the UI for an hour.
+    let retryAfter = null;
+    if (result.response.status === 429) {
+      const raw = d.retry_after ?? result.response.headers?.get?.("Retry-After");
+      const seconds = Number.parseInt(raw, 10);
+      retryAfter = Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds, 120) : null;
+    }
+throw new ApiError(
+        result.response.status,
+        d.error || "ERROR",
+        d.message || "Something went wrong.",
+        d.errors || {},
+        retryAfter,
+        d.details ?? null,
+      );
   }
   return result.data;
+}
+
+/**
+ * Retry a call once the throttle window expires (decision 24).
+ *
+ * Without this the billing screen's only option on a 429 is to show an error,
+ * and because `/preview/` drives the totals, the user is left staring at
+ * STALE figures that look authoritative. Waiting and retrying keeps the
+ * numbers honest.
+ *
+ * Safe because it re-sends the *same* request. Retrying a non-idempotent call
+ * after a 429 is fine specifically because the server refused it before doing
+ * any work, so nothing was written.
+ *
+ * @param {number} attempts how many extra tries (default 1)
+ */
+async function withRetryOnThrottle(fn, attempts = 1) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (!err.isThrottled || attempt >= attempts) throw err;
+      const waitMs = (err.retryAfter ?? 5) * 1000 + 250; // small jitter margin
+      if (typeof console !== "undefined") {
+        console.warn(`Rate limited; retrying in ${Math.round(waitMs / 1000)}s`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
+  }
 }

@@ -1,15 +1,21 @@
 # Done By Me 
 
 gst_billing_app_specification.md
-TECH.md
-Docs/
+  # Anchored with a leading slash on purpose. A bare `Docs/` matches `docs/` too,
+  # because `core.ignorecase=true` on Windows makes ignore matching
+  # case-insensitive - which silently swallowed `docs/QA_CHECKLIST.md`, the
+  # manual test checklist that tasks.md points at as a deliverable. Anchoring
+  # keeps the Windows junk folder ignored without catching the real docs.
 
+TECH.md
+dev.ps1
 # --- Secrets (NEVER commit) ---
 .env
 .env.*
 .env.example
 Backend\.env.example
 session-ses_eea3.md
+Web_Frontend/node_modules/
 
 
 # --- Django ---

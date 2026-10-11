@@ -59,10 +59,17 @@ def make_item(business, **overrides) -> Item:
     Codes default to blank so several items can coexist inside one business
     (the DB has conditional unique constraints on (business, item_code) and
     (business, barcode)). Services get NULL stock by default.
+
+    `track_stock` follows the rule decision 25 introduced: a PRODUCT with a
+    quantity is tracked, a SERVICE never is. Derived here rather than hard-coded
+    so a test that overrides `item_type` to SERVICE still produces a row the
+    database constraints accept.
     """
+    item_type = overrides.get("item_type", Item.ItemType.PRODUCT)
+    current_stock = overrides.get("current_stock", Decimal("10.000"))
     data = {
         "name": "Test Item",
-        "item_type": Item.ItemType.PRODUCT,
+        "item_type": item_type,
         "item_code": "",
         "barcode": "",
         "hsn_sac_code": "",
@@ -70,8 +77,9 @@ def make_item(business, **overrides) -> Item:
         "unit": "PCS",
         "sales_price": Decimal("100.00"),
         "tax_rate": Decimal("18.00"),
-        "current_stock": Decimal("10.000"),
+        "current_stock": current_stock,
         "low_stock_threshold": Decimal("2.000"),
+        "track_stock": item_type == Item.ItemType.PRODUCT and current_stock is not None,
         **overrides,
     }
     return Item.objects.create(business=business, **data)

@@ -30,6 +30,22 @@ from apps.inventory.models import Item
 ZERO = Decimal("0.00")
 
 
+class InvoiceStatus(models.TextChoices):
+    """
+    Module level, not nested inside `Invoice`.
+
+    The lifecycle CheckConstraints added in 2.0.7 reference these values from
+    `Invoice.Meta`, and a nested class is not bound while its own class body is
+    still executing - the same problem `ItemType` had in 2.0.6. `Invoice.Status`
+    is kept as an alias below, so existing `Invoice.Status.DRAFT` references
+    keep working.
+    """
+
+    DRAFT = "DRAFT", "Draft"
+    ISSUED = "ISSUED", "Issued"
+    CANCELLED = "CANCELLED", "Cancelled"
+
+
 class Invoice(TenantModel):
     """
     A customer invoice.
@@ -39,10 +55,8 @@ class Invoice(TenantModel):
     never leave gaps in the legal numbering series.
     """
 
-    class Status(models.TextChoices):
-        DRAFT = "DRAFT", "Draft"
-        ISSUED = "ISSUED", "Issued"
-        CANCELLED = "CANCELLED", "Cancelled"
+    #: Back-compat alias. `Invoice.Status.DRAFT` is used across the codebase.
+    Status = InvoiceStatus
 
     class SupplyType(models.TextChoices):
         INTRA = "INTRA", "Intra-state (CGST + SGST/UTGST)"
@@ -140,6 +154,62 @@ class Invoice(TenantModel):
                 condition=models.Q(invoice_number__gt=""),
                 name="unique_invoice_number_per_business",
             ),
+            # --- Lifecycle invariants (decision 26) -------------------------
+            # Until 2.0.7 these lived only in the service layer and the admin,
+            # so one shell session or a bulk update could produce an "issued"
+            # invoice with no number - a document the books and the customer
+            # cannot reconcile. The database is the cheapest place to refuse it.
+            #
+            # A DRAFT carries no number and no issued_at, by definition.
+            models.CheckConstraint(
+                condition=(
+                    models.Q(status=InvoiceStatus.DRAFT)
+                    | (
+                        models.Q(invoice_number__gt="")
+                        & models.Q(issued_at__isnull=False)
+                    )
+                ),
+                name="issued_invoice_has_number_and_timestamp",
+            ),
+            # The mirror image: a DRAFT must NOT be numbered. Expressed as
+            # "not a draft OR no number" - i.e. it is the DRAFT case that is
+            # constrained. (Writing it as "draft OR no number" would invert it
+            # and demand that every *issued* invoice had a blank number, which
+            # is the opposite of the rule.)
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status=InvoiceStatus.DRAFT)
+                    | models.Q(invoice_number="")
+                ),
+                name="draft_invoice_has_no_number",
+            ),
+            # A cancellation must be complete: timestamp AND reason. A cancelled
+            # invoice with no reason is unexplained in the audit trail.
+            # Expressed as "not cancelled OR complete" - i.e. it is the
+            # CANCELLED case that is constrained.
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(status=InvoiceStatus.CANCELLED)
+                    | (
+                        models.Q(cancelled_at__isnull=False)
+                        & ~models.Q(cancellation_reason="")
+                        & models.Q(cancellation_reason__isnull=False)
+                    )
+                ),
+                name="cancelled_invoice_has_timestamp_and_reason",
+            ),
+            # Money is never negative on an invoice. Line-level checks are on
+            # InvoiceItem below.
+            models.CheckConstraint(
+                condition=models.Q(grand_total__gte=0), name="invoice_grand_total_not_negative"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(subtotal__gte=0), name="invoice_subtotal_not_negative"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(total_discount__gte=0),
+                name="invoice_total_discount_not_negative",
+            ),
         ]
 
     def __str__(self) -> str:
@@ -224,6 +294,35 @@ class InvoiceItem(TenantModel):
                 ),
                 name="invoice_item_is_item_backed_or_self_describing",
             ),
+            # --- Non-negative / positive invariants (decision 26) ----------
+            # `quantity > 0` rather than `>= 0`: a zero-quantity line is a
+            # line that contributes nothing but still appears on the document,
+            # which is a support question every accountant asks about. The
+            # service layer rejects it; the database refuses it too.
+            models.CheckConstraint(
+                condition=models.Q(quantity__gt=0), name="invoice_item_quantity_positive"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(unit_price__gte=0), name="invoice_item_unit_price_not_negative"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(line_discount__gte=0),
+                name="invoice_item_line_discount_not_negative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(tax_rate__gte=0), name="invoice_item_tax_rate_not_negative"
+            ),
+            # Computed money may not be negative either. `total_discount` is
+            # apportioned from the invoice-level discount and can legitimately
+            # reach zero, but never below.
+            models.CheckConstraint(
+                condition=models.Q(taxable_value__gte=0),
+                name="invoice_item_taxable_value_not_negative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(total_amount__gte=0),
+                name="invoice_item_total_not_negative",
+            ),
         ]
 
     def __str__(self) -> str:
@@ -266,6 +365,13 @@ class InvoiceCounter(TenantModel):
             models.UniqueConstraint(
                 fields=["business", "financial_year"],
                 name="unique_invoice_counter_per_business_fy",
+            ),
+            # `PositiveIntegerField` already forbids negatives on some backends,
+            # but stating it explicitly means the guarantee does not depend on
+            # which database we run on. A negative counter would silently
+            # restart a numbering series.
+            models.CheckConstraint(
+                condition=models.Q(last_number__gte=0), name="invoice_counter_not_negative"
             ),
         ]
         verbose_name = "invoice counter"

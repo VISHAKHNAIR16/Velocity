@@ -18,6 +18,7 @@ from .base import (
     make_party,
     make_user,
 )
+from .test_issue_api import issue_url
 
 
 class DraftCreateTests(TestCase):
@@ -442,10 +443,14 @@ class FrozenDocumentTests(TestCase):
         ).json()
 
     def test_issued_invoice_cannot_be_edited_or_deleted(self):
-        record = Invoice.objects.get(pk=self.invoice["id"])
-        record.status = Invoice.Status.ISSUED
-        record.issued_at = "2026-04-01T10:00:00Z"
-        record.save(update_fields=["status", "issued_at"])
+        # Issued through the API rather than by hand-patching `status`. Since
+        # 2.0.7 the database refuses an ISSUED row with no invoice number, which
+        # is exactly the state a hand-rolled setup used to create - so a forged
+        # row is no longer a valid way to reach the "frozen" scenario.
+        issued = self.client_.post(
+            issue_url(self.invoice["id"]), {}, format="json"
+        )
+        self.assertEqual(issued.status_code, 201, issued.content[:300])
 
         patch = self.client_.patch(
             detail_url(self.invoice["id"]), {"notes": "changed"}, format="json"

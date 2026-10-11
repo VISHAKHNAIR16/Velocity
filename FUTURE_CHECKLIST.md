@@ -259,6 +259,14 @@ Everything here came out of debugging run #1, which failed in **33 seconds**.
       this writing — "No known vulnerabilities found"), with dev dependencies informational.
       Consider a scheduled weekly run in addition to per-push, so a newly published advisory is
       caught even on a quiet repo.
+- [x] **The stock ledger has its own CI coverage and its own mutation guard.** `postgres-concurrency`
+      now also runs `apps.inventory.tests_stock_concurrency`, and a second guard job removes
+      `select_for_update()` from `apps/inventory/services/stock.py` and requires the suite to go red.
+      The first guard only mutated `issue.py`, so it would **not** have caught a broken stock lock.
+      Verified locally against Neon: that mutation fails 3 of the 14 stock concurrency tests.
+- [x] **Frontend tests run in CI.** `Web_Frontend/tests/` (jsdom + `node:test`) is a step in
+      `lint-and-test`, installed with `npm ci` against a committed `package-lock.json`. jsdom is the
+      only dependency, kept deliberately small.
 - [ ] **Add `ruff format` as a gate, deliberately later.** The existing code was hand-formatted and
       47 files differ from `ruff format`'s defaults, so enabling it today means a repo-wide
       reformat that buries any real diff. `ruff check` is the lint gate; adopting the formatter
@@ -284,3 +292,90 @@ Everything here came out of debugging run #1, which failed in **33 seconds**.
     operational fix in this file.
 
 ---
+
+---
+
+## 6. Phase 2.1 (stock ledger) — follow-ups
+
+Raised while building 2.1.1-2.1.5. None of these block the ledger; they are the
+things that will bite later if they are not recorded.
+
+- [ ] **The concurrency tests cannot be run against a pooled connection.** `config/settings_test_pg.py`
+      now rewrites a `-pooler` host to its direct equivalent and says so, because PgBouncer in
+      transaction-pooling mode reassigns server connections per transaction, and `SELECT ... FOR UPDATE`
+      is only safe while the whole transaction stays on one. It also breaks teardown, since the pooler
+      holds idle sessions and `DROP DATABASE` fails. CI uses a plain `postgres:16` service, so it never
+      sees this. If you add a test that must not go through a pooler, the rewrite is there.
+- [ ] **`STOCK_CONCURRENCY_WORKERS` defaults to 3.** Each worker holds its own connection and the
+      direct Neon endpoint has a low concurrency cap — past it the server closes connections outright.
+      Raise it when the database can take it; the tests are designed to run on a shared dev branch.
+- [ ] **Threaded tests must close their own connections.** Django opens one connection per thread and
+      a connection cannot be closed from another thread, so every worker now calls
+      `close_thread_connections()`. Without it the suite passes and the command still exits non-zero
+      on `database "test_..." is being accessed by other users` — a failure that looks like a flaky
+      test and is really untidy teardown.
+- [ ] **A race test that cannot lose is not a test.** Verified here: with `select_for_update()` removed
+      from `_lock_items`, the behavioural last-unit race test still passed, because threads rarely
+      collide inside the few hundred microseconds between the stock check and the write. The
+      deterministic guards are `LockIsActuallyRequestedTests` (asserts the SQL really contains
+      `FOR UPDATE`) and the CI mutation job that removes the lock and requires the suite to go red.
+      Standing rule: **any new concurrency test needs a mutation check before it is trusted.**
+- [ ] **Two real bugs were found only by tests, not by review** — worth remembering as the argument
+      for writing them:
+      1. `adjust_stock` and `set_tracking` called `select_for_update()` outside a transaction. That is a
+         500 on PostgreSQL and is *silently ignored* on SQLite. Third occurrence in this repo of the
+         same shape: the local environment is more forgiving than production.
+      2. The custom exception handler rewrote `response.data` and discarded the `details` array, so
+         `INSUFFICIENT_STOCK` reached the frontend with no indication of which item was short.
+- [ ] **`reconcile_stock` is the only repair tool, and it repairs only the cache.** The ledger is
+      authoritative; `--fix` never writes a fabricated movement to make the numbers agree. If the
+      ledger itself is wrong, correct it the way a human would: `Adjust Stock`. Keep that rule — an
+      auto-generated "fixing" movement is indistinguishable from a real one six months later.
+- [ ] **The ledger is append-only in the strict sense.** Bulk `.update()` and `.delete()` on
+      `StockMovement` raise, so a future "optimisation" that trims the table to save space will fail
+      loudly rather than quietly destroying the audit trail. Keep it that way; add an explicit
+      retention rule if the table ever gets large.
+- [ ] **Stock unit conversion is out of scope (decision 37) and will look like a bug to users.**
+      Selling in dozens against stock in pieces is neither converted nor checked. It needs a real
+      conversion model, not a guess. Flag it in the UI before someone files a bug about it.
+- [ ] **Purchases (2.2) must write through the same ledger** (`PURCHASE` / `PURCHASE_REVERSAL`, same
+      lock order, same idempotency). Until then the only ways stock increases are `OPENING` at item
+      creation and `Adjust Stock`, and `reconcile_stock` will show drift the moment a shop's real
+      process needs stock-in.
+- [ ] **Real-browser sign-off for 2.1.5 is outstanding.** `docs/QA_CHECKLIST.md` section 4 is written
+      and unticked. There is no browser or Playwright runner in the dev environment, so the UI was
+      verified with 20 jsdom tests instead — enough to catch wording and wiring bugs, **not** enough to
+      call it done. See also the 2.0.9 browser pass, which is in the same position.
+- [ ] **`gh` CLI still not installed.** Unchanged from the note below, and still the highest-value
+      operational fix in this file.
+
+- [x] **The fast test loop is 7x shorter, with no coverage lost.** Measured, not estimated:
+      `manage.py test apps` took **63s**, and profiling every module separately showed why —
+      `apps.invoices.tests.test_contract` alone took **54s** for 9 tests, while the other 677
+      tests took **9s in total**. The cost is `LiveServerTestCase`: each test commits (so the
+      database is flushed and fixtures are rebuilt) and a real socket server is handled on its
+      own thread with its own connection. A plain `TransactionTestCase` next to it costs 0.028s
+      for the same work, so the server thread is the entire difference.
+
+      Two hypotheses were tested and **rejected** before the cause was pinned down: the
+      `DatabaseCache` from 2.0.5 (54.2s either way) and `serialized_rollback` (only 16 rows to
+      deserialise). Worth recording, because both looked like obvious culprits and a
+      plausible-sounding guess is how a performance problem gets "fixed" in the wrong place.
+
+      The class is now tagged `contract`; the full suite runs `--exclude-tag=contract`, and CI's
+      dedicated `contract-smoke` job runs `--tag=contract`. **That job already existed**, so the
+      contract tests were being run twice per push — once in the full suite and once in the job
+      built for them. The fix was removing the duplicate, not the coverage.
+- [x] **`dev.ps1` gives the fast loop a name.** `\.\dev.ps1 test` is 677 tests in ~11s against
+      65s for `test-all`, and `\.\dev.ps1 help` lists the rest. A Makefile was written first and
+      deleted: **`make` is not installed on the developer's machine**, so it would have been a
+      file nobody could run.
+      - Its `lint` task uses `Start-Process -PassThru` rather than `$LASTEXITCODE`. Reading
+        `$LASTEXITCODE` from a native command inside that script returned 0 for a ruff run that had
+        just printed "Found 2 errors", so `lint` cheerfully reported success on broken code. A
+        lint command that cannot fail is worse than none, and this one had to be verified by
+        injecting a real error — not by running it against clean code and seeing green.
+- [ ] **The 54s contract tests could still be made faster.** They are not understood in detail
+      beyond "`LiveServerTestCase` is expensive"; the per-test cost is ~6s and is not accounted
+      for. Not urgent — they run in their own CI job — but a future `contract` tag on a new
+      expensive test class would quietly add a minute to every push.

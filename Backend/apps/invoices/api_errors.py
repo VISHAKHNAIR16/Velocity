@@ -15,7 +15,7 @@ only carried on the exception.
 from rest_framework import status
 from rest_framework.exceptions import APIException
 
-from apps.invoices.services.issue import InvoiceConflict, IssueError
+from apps.invoices.errors import InvoiceConflict, IssueError
 
 
 class InvoiceLifecycleError(APIException):
@@ -33,6 +33,9 @@ class InvoiceLifecycleError(APIException):
         # error surfaces as the useless "ERROR".
         self.default_code = code
         super().__init__(detail=detail, code=code)
+        # Stock refusals attach per-item `details` alongside this; default empty
+        # so the envelope shape is identical whether or not there are details.
+        self.data = {"details": []}
 
 
 class InvoiceConflictError(InvoiceLifecycleError):
@@ -45,6 +48,30 @@ def translate(exc: IssueError) -> InvoiceLifecycleError:
     """Map a service-layer `IssueError` onto its API representation."""
     cls = InvoiceConflictError if isinstance(exc, InvoiceConflict) else InvoiceLifecycleError
     return cls(exc.code, exc.message, status_code=exc.status, field=exc.field)
+
+
+def translate_stock(exc) -> InvoiceLifecycleError:
+    """
+    Render a stock refusal in the project's envelope, with per-item `details`.
+
+    `INSUFFICIENT_STOCK` needs more than a message: the UI highlights the lines
+    that caused it, and the user needs to know *which* item and by how much.
+    A flat "insufficient stock" would leave them hunting through the invoice.
+    """
+    details = []
+    if hasattr(exc, "shortages"):
+        for shortage in exc.shortages:
+            details.append(
+                {
+                    "item_id": shortage.item_id,
+                    "requested": str(shortage.requested),
+                    "available": str(shortage.available),
+                    "short_by": str(shortage.short_by),
+                }
+            )
+    error = InvoiceLifecycleError(exc.code, exc.message, field=exc.field or "items")
+    error.data = {"details": details}
+    return error
 
 
 def translate_calculation(exc) -> InvoiceLifecycleError:

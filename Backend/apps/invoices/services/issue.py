@@ -19,29 +19,60 @@ from django.utils import timezone
 
 from apps.core.constants import is_hsn, is_sac
 from apps.inventory.models import Item
+from apps.inventory.services.stock import (
+    commit_sale,
+    reserve_sale,
+    reverse_sale,
+)
 
+from ..errors import InvoiceConflict, IssueError
 from ..models import Invoice
 from .draft import apply_totals, compute_totals, resolve_place_of_supply
 from .gst_calculator import GSTCalculationError
 from .numbering import NumberingError, allocate_invoice_number
+from .period_rules import assert_period_open
+
+__all__ = [
+    "IssueError",
+    "InvoiceConflict",
+    "check_issue_gates",
+    "issue_invoice",
+    "cancel_invoice",
+]
 
 
-class IssueError(Exception):
-    """A gate refused the issue. `code` is machine-readable."""
+#: How each engine reports a unique-constraint collision:
+#:   PostgreSQL -> 'duplicate key value violates unique constraint "unique_invoice_number_per_business"'
+#:   SQLite     -> 'UNIQUE constraint failed: invoices_invoice.business_id, invoices_invoice.invoice_number'
+#: Neither includes the other engine's form, and the suite runs the ordinary tests
+#: on SQLite while production is PostgreSQL. Matching on only one of these is
+#: precisely the "works on my machine" bug: the concurrency tests would pass in
+#: CI on PostgreSQL while every SQLite run mislabelled a real data defect as a
+#: race. So both spellings are checked.
+_NUMBER_RACE_CONSTRAINT = "unique_invoice_number_per_business"
+_NUMBER_RACE_COLUMNS = ("invoices_invoice.business_id", "invoices_invoice.invoice_number")
 
-    def __init__(self, code: str, message: str, status: int = 400, field: str = ""):
-        super().__init__(message)
-        self.code = code
-        self.message = message
-        self.status = status
-        self.field = field
 
+def is_number_race(exc: IntegrityError) -> bool:
+    """
+    Is this IntegrityError the unique-number collision, and nothing else?
 
-class InvoiceConflict(IssueError):
-    """The invoice is not in a state that allows the requested transition."""
+    Before 2.0.7 `issue_invoice` translated *every* IntegrityError into
+    `NUMBER_RACE` ("that number was just allocated to another session - please
+    reload"). With no other constraints on the invoice tables that was nearly
+    harmless. 2.0.7 added a dozen CheckConstraints, and after that blanket
+    translation would report a genuine data bug as a phantom concurrency
+    problem - sending the user to reload a page that will never fix it, while
+    the real cause went unlogged.
 
-    def __init__(self, message: str, code: str = "INVALID_STATE", status: int = 409):
-        super().__init__(code, message, status=status)
+    Split out as a named function so it can be tested directly instead of
+    inferred from the source text.
+    """
+    message = str(exc)
+    if _NUMBER_RACE_CONSTRAINT in message:
+        return True
+    # SQLite names columns, not constraints.
+    return all(column in message for column in _NUMBER_RACE_COLUMNS)
 
 
 # ---------------------------------------------------------------------------
@@ -147,7 +178,7 @@ def _validate_hsn_lines(invoice, business, party) -> None:
 # Issue
 # ---------------------------------------------------------------------------
 @transaction.atomic
-def issue_invoice(invoice_id: int, *, user=None) -> tuple[Invoice, bool]:
+def issue_invoice(invoice_id: int, *, user=None) -> tuple[Invoice, bool, list]:
     """
     Issue a draft. Returns `(invoice, already_issued)`.
 
@@ -166,7 +197,10 @@ def issue_invoice(invoice_id: int, *, user=None) -> tuple[Invoice, bool]:
         raise InvoiceConflict("That invoice does not exist.", code="NOT_FOUND", status=404)
 
     if invoice.status == Invoice.Status.ISSUED:
-        return invoice, True
+        # Already issued: idempotent no-op. No stock movement either - the
+        # original issue already moved it, and re-running here is exactly the
+        # double-click that must not deduct twice.
+        return invoice, True, []
     if invoice.status == Invoice.Status.CANCELLED:
         raise InvoiceConflict(
             f"Invoice {invoice.display_number} was cancelled and cannot be issued. "
@@ -176,6 +210,11 @@ def issue_invoice(invoice_id: int, *, user=None) -> tuple[Invoice, bool]:
 
     # 2. Gates. Checked before any number is consumed.
     check_issue_gates(invoice)
+
+    # 2a. Period rules (decision 23). A back-dated invoice in an already-filed
+    # period is never reported, so this is a hard stop rather than the old UI
+    # warning. Future-dated at ISSUE only - a draft may be prepared in advance.
+    assert_period_open(invoice.business, invoice.invoice_date, allow_future=False)
 
     # 3. Recalculate from the STORED line inputs - never from today's item
     #    master. The catalogue may have been re-priced since the draft was made;
@@ -198,7 +237,22 @@ def issue_invoice(invoice_id: int, *, user=None) -> tuple[Invoice, bool]:
     #    document stands on its own even if the party is renamed or deleted.
     _snapshot_parties(invoice)
 
-    # 5. Allocate the number from this business's FY counter.
+    # 5. Stock, in TWO phases (decision 32, step 2.1.4).
+    #
+    #    Phase 1 `reserve_sale` locks the items ascending and checks sufficiency
+    #    WITHOUT writing. Doing it before the counter is locked is the point: a
+    #    failed stock check must never burn a number or contend on the hottest
+    #    row in the system.
+    #
+    #    Phase 2 happens after the number exists, because the ledger's
+    #    `source_label` has to carry the real invoice number and the ledger is
+    #    append-only - so the label cannot be filled in afterwards.
+    stock_plan = reserve_sale(invoice)
+    stock_warnings = list(getattr(stock_plan, "warnings", []) or [])
+
+    # 6. Allocate the number from this business's FY counter. The counter is
+    #    locked LAST (after the items), so the lock order is
+    #    invoice -> items -> counter and cannot deadlock.
     try:
         invoice.invoice_number = allocate_invoice_number(
             invoice.business, invoice.invoice_date
@@ -224,19 +278,23 @@ def issue_invoice(invoice_id: int, *, user=None) -> tuple[Invoice, bool]:
             ]
         )
     except IntegrityError as exc:
-        # The (business, invoice_number) unique constraint fired despite the
-        # row locks. Surface it as a clean 409, never a 500.
-        raise InvoiceConflict(
-            "That invoice number was just allocated to another session - "
-            "please reload.",
-            code="NUMBER_RACE",
-        ) from exc
+        # Only the unique-number constraint is a race. Every other integrity
+        # failure is a real data defect and must surface with its own name in
+        # the logs rather than as a tidy, false story about concurrency.
+        if is_number_race(exc):
+            raise InvoiceConflict(
+                "That invoice number was just allocated to another session - "
+                "please reload.",
+                code="NUMBER_RACE",
+            ) from exc
+        raise
 
-    # 6. Stock deduction slots in here, inside the same transaction (step 2.1),
-    #    skipping free-text lines and SERVICE lines.
-    _deduct_stock_for_issue(invoice)
+    # 7. Phase 2 of stock: write the movements now that the number exists. Same
+    #    transaction as everything above, so a failure here rolls the whole
+    #    issue back - no half-deduction, no burned number.
+    commit_sale(invoice, stock_plan, invoice.invoice_number, user=user)
 
-    return invoice, False
+    return invoice, False, stock_warnings
 
 
 def _snapshot_parties(invoice: Invoice) -> None:
@@ -272,18 +330,6 @@ def _snapshot_parties(invoice: Invoice) -> None:
 def _compose_address(line, city, pincode) -> str:
     parts = [p for p in (line, city, pincode) if p]
     return ", ".join(str(p) for p in parts)
-
-
-def _deduct_stock_for_issue(invoice: Invoice) -> None:
-    """
-    Seam for stock deduction (step 2.1).
-
-    Intentionally a no-op in 1.4: `tasks.md` 1.4.6 defers the deduction itself,
-    but requires it to be placed *inside* the issue transaction so it can never
-    commit separately from the number. Free-text lines (no `item`) and SERVICE
-    lines have no stock and must be skipped when it lands.
-    """
-    return
 
 
 # ---------------------------------------------------------------------------
@@ -324,6 +370,16 @@ def cancel_invoice(invoice_id: int, *, reason: str, user=None) -> Invoice:
             "Only an issued invoice can be cancelled. A draft can just be deleted.",
             code="NOT_ISSUED",
         )
+
+    # Cancelling rewrites a document that already appears in a filed GSTR-1, so
+    # the period rule applies here too (decision 23). A future date is irrelevant
+    # on cancel, so only the lock is checked.
+    assert_period_open(invoice.business, invoice.invoice_date, allow_future=True)
+
+    # Stock comes back, in the same transaction as the cancellation (2.1.4).
+    # Reversal never fails for stock reasons (decision 36): a shopkeeper must
+    # always be able to void a wrong bill, and a reversal only ADDS stock.
+    reverse_sale(invoice, user=user)
 
     invoice.status = Invoice.Status.CANCELLED
     invoice.cancelled_at = timezone.now()

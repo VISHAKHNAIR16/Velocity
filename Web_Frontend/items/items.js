@@ -11,11 +11,11 @@
   const PAGE_SIZE = 20; // keep equal to PAGE_SIZE in the backend REST_FRAMEWORK settings
 
   // Form fields copied between the API payload and the drawer's inputs.
-  const FIELDS = [
-    "name", "item_type", "item_code", "barcode", "hsn_sac_code", "service_description",
-    "unit", "sales_price", "purchase_price", "price_includes_tax",
-    "tax_rate", "current_stock", "low_stock_threshold",
-  ];
+const FIELDS = [
+      "name", "item_type", "item_code", "barcode", "hsn_sac_code", "service_description",
+      "unit", "sales_price", "purchase_price", "price_includes_tax",
+      "tax_rate", "current_stock", "low_stock_threshold", "track_stock",
+    ];
 
   // Fields that must be sent even when empty, so a PATCH can clear them.
   const NULLABLE_FIELDS = ["item_code", "barcode", "hsn_sac_code", "service_description",
@@ -44,10 +44,11 @@
     stock: "",           // "" | "low"
     status: "active",    // "active" | "inactive"
     ordering: "name",
-    count: 0,
-    editingId: null,
-    pendingDelete: null, // { id, name }
-  };
+count: 0,
+      editingId: null,
+      editingItem: null,  // the loaded item, for the read-only stock panel
+      pendingDelete: null, // { id, name }
+    };
 
   let requestCounter = 0;
   let dirty = false;      // unsaved changes in the drawer
@@ -140,6 +141,7 @@
       if (state.type) params.set("item_type", state.type);
       if (state.search) params.set("search", state.search);
       if (state.stock === "low") params.set("low_stock", "true");
+      if (state.stock === "negative") params.set("negative_stock", "true");
       if (state.status === "inactive") params.set("is_active", "false");
 
       const data = await apiRequest(`/items/?${params}`);
@@ -340,6 +342,9 @@
     }
     if (state.stock === "low") {
       chips.push({ label: "Low stock", onRemove: () => { state.stock = ""; $("stock-filter").value = ""; } });
+      if (state.stock === "negative") {
+        chips.push({ label: "Below zero", onRemove: () => { state.stock = ""; $("stock-filter").value = ""; } });
+      }
     }
     if (state.status !== "active") {
       chips.push({
@@ -494,44 +499,95 @@
     }
   }
 
-  /** Product/Service switch: hides stock, swaps HSN<->SAC labels, shows description. */
-  function applyItemType(itemType) {
-    const isService = itemType === "SERVICE";
+// Stock editing is context-dependent, so one function drives all of it.
+    //
+    // Create mode: the quantity box is the *opening* balance and is editable.
+    // Edit mode + tracked: read-only, with Adjust Stock / History instead.
+    // Edit mode + untracked: editable, because there is no ledger to lie to.
+    // Services: no stock at all.
+    function applyStockMode(item) {
+      const isService = (item?.item_type ?? form.elements["item_type"].value) === "SERVICE";
+      const editing = Boolean(state.editingId);
+      const tracks = item
+        ? Boolean(item.tracks_stock)
+        : form.elements["track_stock"].checked;
 
-    form.elements["item_type"].value = isService ? "SERVICE" : "PRODUCT";
-    document.querySelectorAll("#item-type-switch button").forEach((btn) => {
-      const active = btn.dataset.type === (isService ? "SERVICE" : "PRODUCT");
-      btn.classList.toggle("active", active);
-      btn.setAttribute("aria-pressed", String(active));
-    });
+      $("stock-section").classList.toggle("hidden", isService);
+      $("stock-readonly-panel").classList.toggle("hidden", isService || !editing || !tracks);
 
-    $("type-hint").textContent = isService ? TYPE_HINTS.SERVICE : TYPE_HINTS.PRODUCT;
-    $("code-label").textContent = isService ? CODE_LABEL.SERVICE : CODE_LABEL.PRODUCT;
-    $("code-hint").textContent = isService ? CODE_HINT.SERVICE : CODE_HINT.PRODUCT;
+      const box = $("f-current_stock");
+      const readOnly = isService || (editing && tracks);
+      box.readOnly = readOnly;
+      box.classList.toggle("bg-tint/50", readOnly);
+      box.classList.toggle("cursor-not-allowed", readOnly);
 
-    $("service-desc-wrap").classList.toggle("hidden", !isService);
-    $("stock-section").classList.toggle("hidden", isService);
-  }
+      // Opening stock (create) vs a read-only balance (edit).
+      $("current-stock-label").textContent = editing ? "Opening Stock" : "Opening Stock";
+      $("current-stock-hint").textContent = readOnly
+        ? "Locked. Use Adjust Stock to record a correction."
+        : "Count what is on the shelf now. Later changes are recorded automatically.";
 
-  function resetForm() {
-    form.reset();               // restores defaults
-    clearErrors(form);
-    markInvalidFields({});
-    dirty = false;
-    applyItemType("PRODUCT");
-    form.scrollTop = 0;
-  }
+      if (state.editingId && item) {
+        $("ro-current-stock").textContent =
+          item.current_stock === null || item.current_stock === undefined
+            ? "—"
+            : `${Number(item.current_stock).toFixed(3)} ${item.unit || ""}`.trim();
+        $("ro-low-stock-hint").textContent = item.is_low_stock
+          ? "Below the low-stock alert level."
+          : "";
+        $("unit-locked-note").classList.toggle("hidden", !item.unit_locked);
+        const unitSelect = form.elements["unit"];
+        unitSelect.disabled = Boolean(item.unit_locked);
+        unitSelect.classList.toggle("bg-tint/50", Boolean(item.unit_locked));
+      } else {
+        $("unit-locked-note").classList.add("hidden");
+        const unitSelect = form.elements["unit"];
+        unitSelect.disabled = false;
+        unitSelect.classList.remove("bg-tint/50");
+      }
+    }
 
-  function fillForm(item) {
-    FIELDS.forEach((field) => { form.elements[field].value = item[field] ?? ""; });
-    form.elements["price_includes_tax"].checked = Boolean(item.price_includes_tax);
-    // Show 0 as blank so the field does not look pre-filled with a real number.
-    ["sales_price", "purchase_price", "current_stock", "low_stock_threshold"].forEach((f) => {
-      if (Number(item[f]) === 0) form.elements[f].value = "";
-    });
-    applyItemType(item.item_type || "PRODUCT");
-    dirty = false;
-  }
+    /** Product/Service switch: hides stock, swaps HSN<->SAC labels, shows description. */
+    function applyItemType(itemType) {
+      const isService = itemType === "SERVICE";
+
+      form.elements["item_type"].value = isService ? "SERVICE" : "PRODUCT";
+      document.querySelectorAll("#item-type-switch button").forEach((btn) => {
+        const active = btn.dataset.type === (isService ? "SERVICE" : "PRODUCT");
+        btn.classList.toggle("active", active);
+        btn.setAttribute("aria-pressed", String(active));
+      });
+
+      $("type-hint").textContent = isService ? TYPE_HINTS.SERVICE : TYPE_HINTS.PRODUCT;
+      $("code-label").textContent = isService ? CODE_LABEL.SERVICE : CODE_LABEL.PRODUCT;
+      $("code-hint").textContent = isService ? CODE_HINT.SERVICE : CODE_HINT.PRODUCT;
+
+      $("service-desc-wrap").classList.toggle("hidden", !isService);
+      applyStockMode(state.editingId ? state.editingItem : null);
+    }
+
+    function resetForm() {
+      form.reset();               // restores defaults
+      clearErrors(form);
+      markInvalidFields({});
+      dirty = false;
+      state.editingItem = null;
+      applyItemType("PRODUCT");
+      form.scrollTop = 0;
+    }
+
+    function fillForm(item) {
+      FIELDS.forEach((field) => { form.elements[field].value = item[field] ?? ""; });
+      form.elements["price_includes_tax"].checked = Boolean(item.price_includes_tax);
+      form.elements["track_stock"].checked = Boolean(item.tracks_stock);
+      // Show 0 as blank so the field does not look pre-filled with a real number.
+      ["sales_price", "purchase_price", "current_stock", "low_stock_threshold"].forEach((f) => {
+        if (Number(item[f]) === 0) form.elements[f].value = "";
+      });
+      state.editingItem = item;
+      applyItemType(item.item_type || "PRODUCT");
+      dirty = false;
+    }
 
   async function openDrawer(itemId = null) {
     state.editingId = itemId;
@@ -595,15 +651,21 @@
       if (payload[f] === "") payload[f] = null;
     });
 
-    // A service never carries stock or a HSN/SAC confusion.
-    if (payload.item_type === "SERVICE") {
-      payload.current_stock = null;
-      payload.low_stock_threshold = null;
-      if (payload.service_description === "") payload.service_description = null;
-    }
+// A service never carries stock or a HSN/SAC confusion.
+      if (payload.item_type === "SERVICE") {
+        payload.current_stock = null;
+        payload.low_stock_threshold = null;
+        payload.track_stock = false;
+        if (payload.service_description === "") payload.service_description = null;
+      }
 
-    return payload;
-  }
+      // `current_stock` is the *opening* balance and is create-only (2.0.6).
+      // Sending it on an edit invites the server to silently reject a value the
+      // user could not even edit, so it is omitted rather than sent-and-hoped.
+      if (state.editingId) delete payload.current_stock;
+
+      return payload;
+    }
 
   /** Quick checks for instant feedback. The backend validates everything again. */
   function validate(p) {
@@ -815,18 +877,382 @@
     $("confirm-backdrop").addEventListener("click", closeConfirm);
     $("confirm-ok").addEventListener("click", confirmDelete);
 
+      // --- stock (2.1.4) ---
+      form.elements["track_stock"].addEventListener("change", () => applyStockMode(null));
+
+      $("btn-adjust-stock").addEventListener("click", openAdjustDialog);
+      $("btn-stock-history").addEventListener("click", openHistoryDrawer);
+      document.querySelectorAll("[data-adjust-close]").forEach((el) =>
+        el.addEventListener("click", closeAdjustDialog)
+      );
+      document.querySelectorAll("[data-history-close]").forEach((el) =>
+        el.addEventListener("click", closeHistoryDrawer)
+      );
+      $("adjust-save").addEventListener("click", saveAdjustment);
+      $("adjust-quantity").addEventListener("input", refreshAdjustPreview);
+      document.querySelectorAll('input[name="adjust_mode"]').forEach((radio) =>
+        radio.addEventListener("change", refreshAdjustPreview)
+      );
+      ["history-type", "history-from", "history-to"].forEach((id) =>
+        $(id).addEventListener("change", loadHistory)
+      );
+
+      $("dismiss-negative").addEventListener("click", () =>
+        $("negative-stock-banner").classList.add("hidden")
+      );
+      $("btn-show-negative").addEventListener("click", () => {
+        // Filter to exactly the problem rows rather than scrolling: the user has
+        // already said they want to see the negative ones.
+        state.stock = "negative";
+        $("stock-filter").value = "negative";
+        state.page = 1;
+        loadItems();
+      });
+
     document.addEventListener("keydown", (event) => {
       if (event.key !== "Escape") return;
-      if (!confirmWrap.classList.contains("hidden")) closeConfirm();
-      else if (!drawer.classList.contains("hidden")) closeDrawer();
+if (!confirmWrap.classList.contains("hidden")) closeConfirm();
+        else if (!$("history-drawer").classList.contains("hidden")) closeHistoryDrawer();
+        else if (!$("adjust-dialog").classList.contains("hidden")) closeAdjustDialog();
+        else if (!drawer.classList.contains("hidden")) closeDrawer();
     });
   }
 
-  // ===================================================================
-  // START
-  // ===================================================================
-  if (!requireLogin()) return;
-  renderNav("items");
-  bindEvents();
-  loadItems();
+// ===================================================================
+// STOCK: adjust modal, history drawer, negative-stock banner (2.1.4)
+// ===================================================================
+
+    // Read a stock number from the user. Returns null rather than NaN or 0,
+    // because "not a number" and "zero" lead to different errors and must not
+    // collapse into the same value.
+    function readQuantity(input) {
+      const raw = String(input.value || "").trim();
+      if (!raw) return null;
+      if (!/^-?\d+(\.\d{1,3})?$/.test(raw)) return NaN;
+      return Number(raw);
+    }
+
+    /** Decimal-safe "after" preview. Stock is Decimal(12,3) server-side. */
+    function previewAfter(mode, current, quantity) {
+      if (quantity === null || Number.isNaN(quantity)) return "—";
+      const next = mode === "SET" ? quantity : round3(current + quantity);
+      return next.toFixed(3);
+    }
+
+    function round3(value) {
+      return Math.round(value * 1000) / 1000;
+    }
+
+    function currentStock() {
+      const item = state.editingItem;
+      const raw = item?.current_stock;
+      return raw === null || raw === undefined ? 0 : Number(raw);
+    }
+
+    function refreshAdjustPreview() {
+      const mode = form_adjustMode();
+      const quantity = readQuantity($("adjust-quantity"));
+      $("adjust-before").textContent = currentStock().toFixed(3);
+      $("adjust-after").textContent = previewAfter(mode, currentStock(), quantity);
+
+      const el = $("adjust-after");
+      const after = mode === "SET" && quantity !== null && !Number.isNaN(quantity)
+        ? quantity
+        : round3(currentStock() + (quantity || 0));
+      el.classList.toggle("text-danger", after < 0);
+      el.classList.toggle("text-navy", after >= 0);
+
+      $("adjust-quantity-label").textContent = mode === "SET" ? "Set stock to" : "Change by";
+      $("adjust-quantity-hint").textContent = mode === "SET"
+        ? "The recorded quantity after this correction."
+        : "Use a negative number to reduce stock.";
+      $("adjust-quantity").placeholder = mode === "SET" ? "e.g. 48" : "e.g. -2 for a breakage";
+    }
+
+    function form_adjustMode() {
+      return document.querySelector('input[name="adjust_mode"]:checked')?.value || "CHANGE";
+    }
+
+    function openAdjustDialog() {
+      const item = state.editingItem;
+      if (!item) return;
+      $("adjust-item-name").textContent = `${item.name} · currently ${currentStock().toFixed(3)} ${item.unit || ""}`.trim();
+      $("adjust-quantity").value = "";
+      $("adjust-note").value = "";
+      $("adjust-reason").value = "COUNT_CORRECTION";
+      document.querySelector('input[name="adjust_mode"][value="CHANGE"]').checked = true;
+      $("adjust-error").textContent = "";
+      refreshAdjustPreview();
+      $("adjust-dialog").classList.remove("hidden");
+      setTimeout(() => $("adjust-quantity").focus(), 60);
+    }
+
+    function closeAdjustDialog() {
+      $("adjust-dialog").classList.add("hidden");
+      $("adjust-error").textContent = "";
+    }
+
+    async function saveAdjustment() {
+      const item = state.editingItem;
+      if (!item) return;
+      const quantity = readQuantity($("adjust-quantity"));
+      if (quantity === null) {
+        $("adjust-error").textContent = "Enter a quantity.";
+        return;
+      }
+      if (Number.isNaN(quantity)) {
+        $("adjust-error").textContent = "Enter a number with up to 3 decimals, e.g. -2 or 1.5.";
+        return;
+      }
+
+      const btn = $("adjust-save");
+      btn.disabled = true;
+      btn.textContent = "Saving…";
+      try {
+        await apiRequest(`/items/${item.id}/adjust-stock/`, {
+          method: "POST",
+          body: {
+            mode: form_adjustMode(),
+            quantity: quantity.toFixed(3),
+            reason: $("adjust-reason").value,
+            note: $("adjust-note").value.trim(),
+          },
+        });
+        closeAdjustDialog();
+        showToast("Stock adjustment recorded.");
+        // Re-read the item so the read-only panel and the list both show the new
+        // balance. Refetching rather than patching in place keeps the ledger the
+        // single source of truth for what the balance *is*.
+        const updated = await apiRequest(`/items/${item.id}/`);
+        state.editingItem = updated;
+        applyStockMode(updated);
+        await loadItems();
+      } catch (err) {
+        $("adjust-error").textContent = err.message || "Couldn't record the adjustment.";
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Record Adjustment";
+      }
+    }
+
+    // ----- stock history drawer -----
+
+    const MOVEMENT_STYLES = {
+      OPENING: "bg-blue-100 text-blue-700",
+      SALE: "bg-amber-100 text-amber-700",
+      SALE_REVERSAL: "bg-emerald-100 text-emerald-700",
+      ADJUSTMENT: "bg-violet-100 text-violet-700",
+      TRACKING_ON: "bg-blue-100 text-blue-700",
+      TRACKING_OFF: "bg-muted/20 text-muted",
+    };
+
+    const MOVEMENT_LABELS = {
+      OPENING: "Opening",
+      SALE: "Sale",
+      SALE_REVERSAL: "Cancellation",
+      ADJUSTMENT: "Adjustment",
+      TRACKING_ON: "Tracking enabled",
+      TRACKING_OFF: "Tracking disabled",
+    };
+
+    function historyQuery() {
+      const params = new URLSearchParams();
+      const type = $("history-type").value;
+      if (type) params.set("movement_type", type);
+      if ($("history-from").value) params.set("date_from", $("history-from").value);
+      if ($("history-to").value) params.set("date_to", $("history-to").value);
+      const qs = params.toString();
+      return qs ? `?${qs}` : "";
+    }
+
+    async function loadHistory() {
+      const item = state.editingItem;
+      if (!item) return;
+      const body = $("history-body");
+      body.replaceChildren(h("p", { className: "text-sm text-muted", textContent: "Loading…" }));
+
+      try {
+        const data = await apiRequest(`/items/${item.id}/stock-history/${historyQuery()}`);
+        renderHistory(data);
+      } catch (err) {
+        body.replaceChildren(
+          h("p", { className: "text-sm text-danger", textContent: err.message })
+        );
+      }
+    }
+
+    function renderHistory(data) {
+      const body = $("history-body");
+      body.replaceChildren();
+      const rows = data.movements || [];
+
+      $("history-item-name").textContent = state.editingItem?.name || "";
+
+      if (!rows.length) {
+        body.append(
+          h("p", {
+            className: "text-sm text-muted text-center py-8",
+            textContent: "No movements match these filters.",
+          })
+        );
+        $("history-footer").textContent = "";
+        return;
+      }
+
+      const list = h("div", { className: "space-y-2" });
+      rows.forEach((row) => {
+        const amount = Number(row.quantity_change);
+        const isNegative = amount < 0;
+        list.append(
+          h("div", { className: "flex items-start justify-between gap-3 p-3 rounded-lg border border-line" },
+            h("div", { className: "min-w-0" },
+              h("div", { className: "flex items-center gap-2 flex-wrap" },
+                h("span", {
+                  className: `text-xs font-semibold px-2 py-0.5 rounded ${MOVEMENT_STYLES[row.movement_type] || "bg-muted/20 text-muted"}`,
+                  textContent: MOVEMENT_LABELS[row.movement_type] || row.movement_type,
+                }),
+                h("span", {
+                  className: "text-sm font-semibold tabular-nums " + (isNegative ? "text-danger" : "text-navy"),
+                  textContent: `${amount > 0 ? "+" : ""}${row.quantity_change}`,
+                })
+              ),
+              h("p", { className: "text-xs text-muted mt-1 truncate", textContent: row.source_label || row.note || "—" }),
+              h("p", {
+                className: "text-xs text-muted",
+                textContent: new Date(row.created_at).toLocaleString(),
+              })
+            ),
+            // The running balance is what makes the column readable: read down
+            // and the numbers tell the story without any arithmetic.
+            h("div", { className: "text-right flex-shrink-0" },
+              h("p", { className: "text-xs text-muted uppercase tracking-wider", textContent: "Balance" }),
+              h("p", { className: "text-sm font-bold tabular-nums text-navy", textContent: row.stock_after })
+            )
+          )
+        );
+      });
+      body.append(list);
+
+      // "Showing 200 of 1,438" - a truncated list that looks complete is how a
+      // shopkeeper concludes a movement never happened.
+      const total = data.count ?? rows.length;
+      const returned = data.returned ?? rows.length;
+      $("history-footer").textContent =
+        returned < total
+          ? `Showing the ${returned} most recent of ${total}. Narrow the dates to see older movements.`
+          : `${total} movement${total === 1 ? "" : "s"}.`;
+    }
+
+    function openHistoryDrawer() {
+      $("history-drawer").classList.remove("hidden");
+      loadHistory();
+    }
+
+    function closeHistoryDrawer() {
+      $("history-drawer").classList.add("hidden");
+    }
+
+    // ----- negative-stock banner -----
+
+    /**
+     * Ask the server which tracked items are below zero.
+     *
+     * Counted rather than derived from the current page: the banner says "3
+     * items are below zero", and a count taken from the 20 rows on screen would
+     * say "1" on page 4 of 5 and be simply wrong.
+     */
+    async function refreshNegativeBanner() {
+      const banner = $("negative-stock-banner");
+      try {
+        const data = await apiRequest("/items/?negative_stock=true&page_size=100");
+        const rows = data.results || [];
+        if (!rows.length) {
+          banner.classList.add("hidden");
+          return;
+        }
+        $("negative-stock-text").textContent =
+          `${rows.length} tracked item${rows.length === 1 ? "" : "s"} went below zero. ` +
+          "Invoices were still issued - count your stock and record the difference with Adjust Stock.";
+        banner.classList.remove("hidden");
+      } catch {
+        banner.classList.add("hidden"); // a failed check must not block the page
+      }
+    }
+
+    // ===================================================================
+    // START
+    // ===================================================================
+// ===================================================================
+// TEST SEAMS (2.1.4)
+//
+// Thin wrappers over the real functions above. `node --check` only proves the
+// file parses, and the bugs that matter in this UI are wording and wiring bugs
+// - a badge reading "in stock" when stock is short, "NaN" in a preview, a unit
+// silently editable when the server will reject it. All of those parse fine.
+//
+// Nothing in the UI calls these; they only read the functions above.
+// ===================================================================
+    window.__testSetEditingItem = (item) => {
+      state.editingItem = item;
+      state.editingId = item ? item.id : null;
+      // Refresh the modal preview too, so a test can assert on what the user
+      // would actually see rather than on a value computed behind the DOM.
+      refreshAdjustPreview();
+    };
+
+    window.__testApplyStockMode = (item) => {
+      state.editingItem = item;
+      state.editingId = item ? item.id : null;
+      applyStockMode(item);
+    };
+
+    window.__testPreviewAdjust = (mode, raw) => {
+      const quantity = raw === "" || raw === null || raw === undefined ? null : Number(raw);
+      return previewAfter(mode, currentStock(), Number.isNaN(quantity ?? NaN) ? NaN : quantity);
+    };
+
+    window.__testPreviewAdjustIsNegative = (mode, raw) => {
+      const quantity = Number(raw);
+      const next = mode === "SET" ? quantity : round3(currentStock() + quantity);
+      return next < 0;
+    };
+
+    window.__testBuildPayload = ({ editing, fields }) => {
+      const savedId = state.editingId;
+      state.editingId = editing ? 1 : null;
+      FIELDS.forEach((field) => {
+        const el = form.elements[field];
+        if (!el) return;
+        if (el.type === "checkbox") el.checked = Boolean(fields[field]);
+        else el.value = fields[field] ?? "";
+      });
+      try {
+        return buildPayload();
+      } finally {
+        state.editingId = savedId;
+      }
+    };
+
+    window.__testHistoryFooter = ({ count, returned }) => {
+      const total = count ?? returned;
+      return returned < total
+        ? `Showing the ${returned} most recent of ${total}. Narrow the dates to see older movements.`
+        : `${total} movement${total === 1 ? "" : "s"}.`;
+    };
+
+    window.__testRenderHistoryRows = (rows) =>
+      rows.map((row) => {
+        const amount = Number(row.quantity_change);
+        return {
+          label: MOVEMENT_LABELS[row.movement_type] || row.movement_type,
+          amount: `${amount > 0 ? "+" : ""}${row.quantity_change}`,
+          balance: row.stock_after,
+          negative: amount < 0,
+        };
+      });
+
+    if (!requireLogin()) return;
+    renderNav("items");
+    bindEvents();
+    loadItems().then(refreshNegativeBanner);
 })();

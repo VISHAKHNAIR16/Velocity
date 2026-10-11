@@ -82,6 +82,8 @@ class BusinessProfileSerializer(serializers.ModelSerializer):
             "round_invoice_total",
             "invoice_number_prefix",
             "hsn_min_digits",
+            "books_locked_until",
+            "negative_stock_policy",
             "is_complete",
             "created_at",
             "updated_at",

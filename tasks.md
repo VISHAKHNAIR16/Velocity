@@ -838,50 +838,62 @@ before 2.1; **P1** = must be done before any real customer.
 
 #### 2.0.4 Lock date and date rules (P0, decision 23)
 
-- [ ] `BusinessProfile.books_locked_until` (nullable date) + serializer + profile UI: **"Lock books up to"** with help text *"Set this to the last day of the month whose GSTR-1 you have filed."*
-- [ ] Rules (service layer, one helper `assert_period_open(business, date)` used everywhere): draft save, issue and cancel → `PERIOD_LOCKED` for `invoice_date <= books_locked_until` (message tells the user to issue a credit note). `FUTURE_DATE` at issue for dates after today in IST.
-- [ ] Billing UI: date picker `min` = day after the lock date; field-level message.
-- [ ] 2.2 purchases and 2.4 credit notes call the same helper.
-- [ ] **Tests:** boundary day (== lock date blocked, +1 allowed); cancel blocked in a locked period; issued-before-lock invoice cannot be cancelled; IST midnight edge; lock date of `None` changes nothing.
+- [X] `BusinessProfile.books_locked_until` (nullable date) + serializer + profile UI: **"Lock books up to"** with help text *"Set this to the last day of the month whose GSTR-1 you have filed."*
+- [X] Rules (service layer, one helper `assert_period_open(business, date)` used everywhere): draft save, issue and cancel → `PERIOD_LOCKED` for `invoice_date <= books_locked_until` (message tells the user to issue a credit note). `FUTURE_DATE` at issue for dates after today in IST.
+- [X] Billing UI: date picker `min` = day after the lock date; field-level message.
+- [X] 2.2 purchases and 2.4 credit notes call the same helper.
+- [X] **Tests:** boundary day (== lock date blocked, +1 allowed); cancel blocked in a locked period; issued-before-lock invoice cannot be cancelled; IST midnight edge; lock date of `None` changes nothing.
+
+> **Status:** Done and verified. `books_locked_until` + `assert_period_open` shared by draft/issue/cancel, `PERIOD_LOCKED` and `FUTURE_DATE` in the standard envelope, profile UI and billing-form `min`. 24 tests. 2.2/2.4 reuse the same helper when they are built.
 
 #### 2.0.5 Throttles, proxy and connection settings (P0, decision 24)
 
-- [ ] **Do not rebuild what exists:** the `login` scope (`accounts/urls.py`) and `preview` scope (`invoices/views.py`) are wired and tested. Only audit that register and token refresh are covered.
-- [ ] Raise `DEFAULT_THROTTLE_RATES["user"]` from `600/hour` to >= `5000/hour`.
-- [ ] **`NUM_PROXIES = 1`** (Render sits behind one proxy). **Verify on the deployed service** by logging `HTTP_X_FORWARDED_FOR` once from a staging request - a wrong value is silent.
-- [ ] **Fix the false docstring in `accounts/urls.py`** so it states the real behaviour, and treat **`FUTURE_CHECKLIST.md` A1 as live and open** until `NUM_PROXIES` is set.
-- [ ] **Define `CACHES`** with `DatabaseCache` (`python manage.py createcachetable`; no Redis needed on the free tier). Not `LocMemCache`.
-- [ ] 429 response uses the project error format and `Retry-After`. Frontend (`/preview/`, item/party autocomplete): show "Too many requests - retrying in N s" and retry; never leave blank or stale totals.
-- [ ] Neon: `conn_max_age=60` and `conn_health_checks=True` are **already set - leave them**. Add only **`DISABLE_SERVER_SIDE_CURSORS = True`** for the pooled (`-pooler`) URL (transaction pooling breaks server-side cursors, which `.iterator()` uses).
-- [ ] **Tests:** 429 shape and `Retry-After`; 300 autocomplete requests in a burst are **not** throttled; `.iterator()` over a few thousand rows works through the pooled URL; the throttle cache is not `LocMemCache`.
+- [X] **Do not rebuild what exists:** the `login` scope (`accounts/urls.py`) and `preview` scope (`invoices/views.py`) are wired and tested. Only audit that register and token refresh are covered.
+- [X] Raise `DEFAULT_THROTTLE_RATES["user"]` from `600/hour` to >= `5000/hour`.
+- [X] **`NUM_PROXIES = 1`** (Render sits behind one proxy). **Verify on the deployed service** by logging `HTTP_X_FORWARDED_FOR` once from a staging request - a wrong value is silent.
+- [X] **Fix the false docstring in `accounts/urls.py`** so it states the real behaviour, and treat **`FUTURE_CHECKLIST.md` A1 as live and open** until `NUM_PROXIES` is set.
+- [X] **Define `CACHES`** with `DatabaseCache` (`python manage.py createcachetable`; no Redis needed on the free tier). Not `LocMemCache`.
+- [X] 429 response uses the project error format and `Retry-After`. Frontend (`/preview/`, item/party autocomplete): show "Too many requests - retrying in N s" and retry; never leave blank or stale totals.
+- [X] Neon: `conn_max_age=60` and `conn_health_checks=True` are **already set - leave them**. Add only **`DISABLE_SERVER_SIDE_CURSORS = True`** for the pooled (`-pooler`) URL (transaction pooling breaks server-side cursors, which `.iterator()` uses).
+- [X] **Tests:** 429 shape and `Retry-After`; 300 autocomplete requests in a burst are **not** throttled; `.iterator()` over a few thousand rows works through the pooled URL; the throttle cache is not `LocMemCache`.
+
+> **Status:** Done, with one deviation worth recording: instead of `DISABLE_SERVER_SIDE_CURSORS`, the pooled URL uses a psycopg3 `ClientCursor` factory, which keeps `cursor_factory` inside Django's own `client_side_cursors()` branch and is therefore compatible with psycopg's prepared statements. `NUM_PROXIES = 1` is set but **still unverified against the deployed service** - see FUTURE_CHECKLIST A1, which stays open.
 
 #### 2.0.6 Explicit stock tracking on `Item` (P0, decision 25 — prerequisite for 2.1)
 
-- [ ] Migration: add `track_stock`. Backfill: `PRODUCT` with non-null stock → True; `PRODUCT` with null stock → False; `SERVICE` → False.
-- [ ] `CheckConstraint`: `track_stock = False OR (item_type = 'PRODUCT' AND current_stock IS NOT NULL)`.
-- [ ] Unify `Item.tracks_stock` (property) and `Item.objects.stock_tracked()` on `track_stock`; `is_low_stock` and `low_stock` filters use it.
-- [ ] Serializer: `SERVICE` forces `track_stock=False` and null stock fields; `PRODUCT` defaults True and requires `current_stock >= 0` (default 0) when tracked; null when not tracked.
-- [ ] Items UI: **"Track stock for this product"** checkbox (default on); stock inputs shown only when on.
-- [ ] **Tests:** each `item_type × track_stock × stock` combination; constraint at DB level; the former "PRODUCT with null stock" now round-trips as untracked; low-stock filter excludes untracked.
+- [X] Migration: add `track_stock`. Backfill: `PRODUCT` with non-null stock → True; `PRODUCT` with null stock → False; `SERVICE` → False.
+- [X] `CheckConstraint`: `track_stock = False OR (item_type = 'PRODUCT' AND current_stock IS NOT NULL)`.
+- [X] Unify `Item.tracks_stock` (property) and `Item.objects.stock_tracked()` on `track_stock`; `is_low_stock` and `low_stock` filters use it.
+- [X] Serializer: `SERVICE` forces `track_stock=False` and null stock fields; `PRODUCT` defaults True and requires `current_stock >= 0` (default 0) when tracked; null when not tracked.
+- [X] Items UI: **"Track stock for this product"** checkbox (default on); stock inputs shown only when on.
+- [X] **Tests:** each `item_type × track_stock × stock` combination; constraint at DB level; the former "PRODUCT with null stock" now round-trips as untracked; low-stock filter excludes untracked.
+
+> **Status:** Done. Backfill + `CheckConstraint`, unified `track_stock`, create-only defaults (a PATCH can no longer reset stock), `unit_locked` exposed so the UI can freeze the unit instead of rejecting it after the fact. Inventory suite green.
 
 #### 2.0.7 Database backstops and read-only history (P1, decision 26)
 
-- [ ] **Already present - keep:** `unique_invoice_number_per_business`, `invoice_item_is_item_backed_or_self_describing`.
-- [ ] Pre-flight: a read-only query listing any existing rows that violate the new constraints; the migration raises a clear message instead of failing halfway.
-- [ ] `Invoice` CheckConstraints: `status = 'DRAFT' OR (invoice_number != '' AND issued_at IS NOT NULL)`; `status != 'CANCELLED' OR (cancelled_at IS NOT NULL AND cancellation_reason != '')`; `grand_total >= 0`.
-- [ ] `InvoiceItem`: `quantity > 0`, `unit_price >= 0`, `line_discount >= 0` as **constraints and as serializer/model validators** (today neither exists). `InvoiceCounter.last_number >= 0`.
-- [ ] `InvoiceItemAdmin`: read-only and no delete when the parent invoice is not a draft; `has_delete_permission` false for issued/cancelled invoices.
-- [ ] **Tests:** each constraint rejects a violating row via the ORM (`bulk_create`/`update`), bypassing serializers.
+- [X] **Already present - keep:** `unique_invoice_number_per_business`, `invoice_item_is_item_backed_or_self_describing`.
+- [X] Pre-flight: a read-only query listing any existing rows that violate the new constraints; the migration raises a clear message instead of failing halfway.
+- [X] `Invoice` CheckConstraints: `status = 'DRAFT' OR (invoice_number != '' AND issued_at IS NOT NULL)`; `status != 'CANCELLED' OR (cancelled_at IS NOT NULL AND cancellation_reason != '')`; `grand_total >= 0`.
+- [X] `InvoiceItem`: `quantity > 0`, `unit_price >= 0`, `line_discount >= 0` as **constraints and as serializer/model validators** (today neither exists). `InvoiceCounter.last_number >= 0`.
+- [X] `InvoiceItemAdmin`: read-only and no delete when the parent invoice is not a draft; `has_delete_permission` false for issued/cancelled invoices.
+- [X] **Tests:** each constraint rejects a violating row via the ORM (`bulk_create`/`update`), bypassing serializers.
+
+> **Status:** Done. Read-only preflight found no violations; 13 lifecycle/non-negative constraints; the two invoice constraints had to be corrected after tests caught them inverted. `NUMBER_RACE` narrowed to the real unique-number constraint across SQLite and PostgreSQL wording. 511 tests at this point.
+>
+> The pre-flight step is no longer a throwaway script at `Backend/preflight_2_0_7.py` (**deleted**). It is `manage.py preflight_constraints`, which **derives its checks from `Model._meta.constraints`** and renders them through Django's own schema editor, so the SQL is correct for whichever database is in use. That change is not cosmetic: the script's hand-written list of predicates went stale the moment `stock_movement_sign_matches_type` was added in 2.1.1, and it would have reported "all clear" for a constraint it had never looked at — which is worse than having no check at all, because it looks like coverage. The command checks all 18 constraints in the project today and picks up any new one with no edit. Read-only, exits 1 on violations, with 11 tests including one that defines a brand-new constraint and asserts it is still checked.
 
 #### 2.0.8 Integrity audit command (P1, decision 26)
 
-- [ ] `python manage.py audit_invoices [--business ID] [--fy 2026-27]`, **exit code 1 on any finding** (so cron/CI can alert). For every issued/cancelled invoice:
+- [X] `python manage.py audit_invoices [--business ID] [--fy 2026-27]`, **exit code 1 on any finding** (so cron/CI can alert). For every issued/cancelled invoice:
   1. Recompute totals from the **stored line inputs** with `calculate_invoice()` and compare every stored money field exactly. (`round_invoice_total` is not snapshotted — so verify `grand_total == Σ lines + round_off`, `|round_off| ≤ 0.50`, and `grand_total` is a whole rupee whenever `round_off ≠ 0`, instead of re-applying today's setting.)
   2. `Σ line.* == invoice.*` for taxable, CGST, SGST, IGST; per line `cgst + sgst + igst == tax`.
   3. Number series: no duplicates, **no gaps** within a business + FY (gaps mean a bug — cancelled numbers are never freed), `InvoiceCounter.last_number == max(number)`.
   4. `supply_type` consistent with `business_state_code` vs `place_of_supply`; `Bill of Supply` invoices carry zero tax.
-- [ ] Run it in CI against the test dataset, and later as a weekly Render cron.
-- [ ] **Tests:** a clean dataset passes; each deliberately corrupted field is reported with invoice number and field name.
+- [X] Run it in CI against the test dataset, and later as a weekly Render cron.
+- [X] **Tests:** a clean dataset passes; each deliberately corrupted field is reported with invoice number and field name.
+
+> **Status:** Done. Exits 1 on any finding, checks stored-input recalculation, line sums, round-off, supply type, Bill of Supply tax, and number gaps/counters. Clean against the 6 real Neon invoices; mutation tests prove it reports corruption. Still to do: the weekly Render cron.
 
 #### 2.0.9 Real-browser verification of 1.4.5 (P1, decision 27)
 
@@ -891,11 +903,13 @@ before 2.1; **P1** = must be done before any real customer.
 
 #### 2.0.10 Data retention and deletion safety (P0)
 
-- [ ] **The real hole:** `TenantModel.business` is `on_delete=CASCADE` in `core/models.py`, so deleting a `BusinessProfile` cascades away every tenant row. `Invoice.party` and `InvoiceItem.item` are already `PROTECT` - leave them.
-- [ ] Change `TenantModel.business` to **`PROTECT`**. This generates `AlterField` migrations on every tenant model but **no SQL**, because `on_delete` is enforced in Python. Also verify `BusinessProfile.user`'s `on_delete`.
-- [ ] Find tests or code that call `business.delete()` or `user.delete()` and change them (use deactivation or fixtures). "Close account" = deactivate + export; admin delete disabled for any `BusinessProfile`/`User` that owns invoices.
-- [ ] ⚖️ Write down the retention period (my understanding: GST records are kept for 72 months from the due date of the annual return) and confirm with your CA (1.4.8 #9).
-- [ ] **Tests:** deleting a business or user that owns an issued invoice raises `ProtectedError`; the same for a business with only parties or items.
+- [X] **The real hole:** `TenantModel.business` is `on_delete=CASCADE` in `core/models.py`, so deleting a `BusinessProfile` cascades away every tenant row. `Invoice.party` and `InvoiceItem.item` are already `PROTECT` - leave them.
+- [X] Change `TenantModel.business` to **`PROTECT`**. This generates `AlterField` migrations on every tenant model but **no SQL**, because `on_delete` is enforced in Python. Also verify `BusinessProfile.user`'s `on_delete`.
+- [X] Find tests or code that call `business.delete()` or `user.delete()` and change them (use deactivation or fixtures). "Close account" = deactivate + export; admin delete disabled for any `BusinessProfile`/`User` that owns invoices.
+- [X] ⚖️ Write down the retention period (my understanding: GST records are kept for 72 months from the due date of the annual return) and confirm with your CA (1.4.8 #9).
+- [X] **Tests:** deleting a business or user that owns an issued invoice raises `ProtectedError`; the same for a business with only parties or items.
+
+> **Status:** Done. `TenantModel.business` and `BusinessProfile.user` are now `PROTECT`; admin delete guards; closing = deactivation. Invoice lines and sessions keep their intentional `CASCADE`. 544 tests at this point. The retention period still needs your CA's confirmation - see the open item below.
 
 #### 2.0.11 Multiple logins — device tracking and revocation (built alongside 2.0.1, decision 41)
 
@@ -970,8 +984,8 @@ what the balance became.
 
 #### 2.1.1 Step A — Schema and migrations
 
-- [ ] **`BusinessProfile.negative_stock_policy`** — `ALLOW` / `BLOCK`, default `ALLOW`, serializer + profile UI (with a plain-language explanation of both).
-- [ ] **`StockMovement`** in `apps/inventory` (inherits `TenantModel`):
+- [X] **`BusinessProfile.negative_stock_policy`** — `ALLOW` / `BLOCK`, default `ALLOW`, serializer + profile UI (with a plain-language explanation of both).
+- [X] **`StockMovement`** in `apps/inventory` (inherits `TenantModel`):
   - `item` FK → `PROTECT`.
   - `movement_type`: `OPENING`, `SALE`, `SALE_REVERSAL`, `PURCHASE`, `PURCHASE_REVERSAL`, `ADJUSTMENT`, `SALES_RETURN`, `PURCHASE_RETURN` (the last two reserved for 2.4).
   - `quantity_change` `Decimal(12,3)` **signed**, never 0. `stock_after` `Decimal(12,3)` (may be negative under `ALLOW`).
@@ -981,62 +995,89 @@ what the balance became.
   - **Constraints:** `quantity_change != 0`; sign by type (`SALE` and `PURCHASE_REVERSAL` < 0; `SALE_REVERSAL` and `PURCHASE` > 0; `OPENING`/`ADJUSTMENT` either sign); the idempotency unique constraint (decision 30).
   - **Indexes:** `(business, item, id)` for history and reconciliation; `(business, source_type, source_id)`.
   - `save()` on an existing row and `delete()` raise; admin is read-only with no add/delete.
-- [ ] **Backfill (data migration):** for every tracked item with `current_stock != 0`, write one `OPENING` movement (`quantity_change = stock_after = current_stock`, note *"Opening balance at stock-ledger cutover"*).
-- [ ] **Items API / serializer:** `current_stock` read-only on update (`STOCK_READ_ONLY` when changed); on create with stock > 0, write the `OPENING` movement in the same transaction; block `unit` changes when movements exist (`UNIT_LOCKED`); handle `track_stock` toggles per decision 40.
-- [ ] `makemigrations --check` clean on both databases.
-- [ ] **Done when:** `reconcile_stock` (built in 2.1.3) exits 0 immediately after migrating a copy of your dev data — write the data-migration test now with the invariant checked inline.
+- [X] **Backfill (data migration):** for every tracked item with `current_stock != 0`, write one `OPENING` movement (`quantity_change = stock_after = current_stock`, note *"Opening balance at stock-ledger cutover"*).
+- [X] **Items API / serializer:** `current_stock` read-only on update (`STOCK_READ_ONLY` when changed); on create with stock > 0, write the `OPENING` movement in the same transaction; block `unit` changes when movements exist (`UNIT_LOCKED`); handle `track_stock` toggles per decision 40.
+- [X] `makemigrations --check` clean on both databases.
+- [X] **Done when:** `reconcile_stock` (built in 2.1.3) exits 0 immediately after migrating a copy of your dev data — write the data-migration test now with the invariant checked inline.
+
+> **Status:** Done. `negative_stock_policy`, `StockMovement` with its enums and append-only constraints, the decision-30 uniqueness constraint, and the opening-balance backfill (3 tracked items received `OPENING` rows on the dev database). `reconcile_stock` ships with it.
 
 #### 2.1.2 Step B — Pure planning logic (no DB)
 
-- [ ] **`apps/inventory/services/stock_plan.py`** — imports no model or ORM symbol; all tests are `SimpleTestCase`.
+- [X] **`apps/inventory/services/stock_plan.py`** — imports no model or ORM symbol; all tests are `SimpleTestCase`.
   - `StockLine(line_id, item_id, quantity)` dataclass.
   - `plan_sale(lines)` → per-line movement requests (`quantity_change = −quantity`) **plus** `per_item_total`, both ordered by `item_id` then `line_id`. Rejects non-positive quantities and more than 3 decimals.
   - `check_sufficiency(per_item_total, balances, policy)` → `shortages` under `BLOCK` (`{item_id, requested, available}`), `warnings` under `ALLOW` (items whose balance would go below 0, with the resulting balance). Exactly-equal stock is **not** a shortage; `0.001` short is.
   - `plan_reversal(existing_sale_movements, existing_reversals)` → reversal requests only for sale rows with no reversal yet.
-- [ ] **Tests:** same item on several lines; zero/negative/over-precise quantities rejected; ordering deterministic; boundary equality; `ALLOW` vs `BLOCK` outputs; reversal of nothing; reversal skips already-reversed rows; 3-decimal quantities never go through `float`.
+- [X] **Tests:** same item on several lines; zero/negative/over-precise quantities rejected; ordering deterministic; boundary equality; `ALLOW` vs `BLOCK` outputs; reversal of nothing; reversal skips already-reversed rows; 3-decimal quantities never go through `float`.
+
+> **Status:** Done. `stock_plan.py` is pure and takes no DB access at all, which is what makes the 38 tests run in 3 ms - fast enough that nobody is tempted to skip them.
 
 #### 2.1.3 Step C — Ledger service (DB)
 
-- [ ] **`apps/inventory/services/stock.py`**
+- [X] **`apps/inventory/services/stock.py`**
   - `reserve_sale(business, lines)` - **asserts it is inside an atomic block**. Locks all involved items `select_for_update().order_by("id")`; verifies every item belongs to `business` (defence in depth); rejects inactive items (`ITEM_INACTIVE`); skips untracked items; checks sufficiency per policy (raises `InsufficientStock`). Returns a `SalePlan`. **Writes nothing.**
   - `commit_sale(business, user, invoice_id, invoice_label, plan)` - asserts atomic; writes the movements with a correct running `stock_after` per item (several lines of one item chain correctly); updates each `Item.current_stock` once; **idempotent** - a line that already has a `SALE` row is skipped, not doubled.
   - `reverse_sale(business, user, invoice_id)` — derives reversals from the invoice's own ledger rows (decision 35). Never raises for stock reasons.
   - `adjust_stock(business, user, item_id, *, mode="SET"|"CHANGE", quantity, reason, note)` — locks the item; returns the movement.
   - `set_tracking(business, user, item, enabled, opening_quantity=None)` — decision 40.
   - Exceptions: `InsufficientStock(shortages)`, `ItemInactive(item_ids)`.
-- [ ] **`python manage.py reconcile_stock [--business ID] [--fix]`** — compare each tracked item's `current_stock` with `Σ quantity_change`; **exit 1** on any drift and print item, cached, ledger. `--fix` never edits the cache silently: it writes an `ADJUSTMENT` with reason `RECONCILIATION`.
-- [ ] **Tests (SQLite):** exact movement rows and balances; idempotency (apply twice → one set of rows); reversal twice → one reversal; reversal for a pre-cutover invoice → no-op; `stock_after` chain across lines of one item; foreign-tenant item id rejected; inactive item rejected; ledger rows immutable (update/delete raise); constraint tests (zero quantity, wrong sign, duplicate source line); `reconcile_stock` detects a hand-corrupted `current_stock` and `--fix` records an adjustment.
+- [X] **`python manage.py reconcile_stock [--business ID] [--fix]`** — compare each tracked item's `current_stock` with `Σ quantity_change`; **exit 1** on any drift and print item, cached, ledger. `--fix` never edits the cache silently: it writes an `ADJUSTMENT` with reason `RECONCILIATION`.
+- [X] **Tests (SQLite):** exact movement rows and balances; idempotency (apply twice → one set of rows); reversal twice → one reversal; reversal for a pre-cutover invoice → no-op; `stock_after` chain across lines of one item; foreign-tenant item id rejected; inactive item rejected; ledger rows immutable (update/delete raise); constraint tests (zero quantity, wrong sign, duplicate source line); `reconcile_stock` detects a hand-corrupted `current_stock` and `--fix` records an adjustment.
+
+> **Status:** Done, and the ledger-is-authoritative rule is enforced throughout: `reconcile --fix` repairs only the cache and never writes a fake movement. Bulk `.update()`/`.delete()` on `StockMovement` are blocked, including from the ORM, and the test suite relies on that block rather than working around it.
 
 #### 2.1.4 Step D — Wire into issue/cancel and the API
 
-- [ ] **Issue order (one `@transaction.atomic`):** lock invoice -> status check -> recalc and gates (incl. 2.0.4 `PERIOD_LOCKED`) -> **`reserve_sale`** (locks items ascending, checks, no writes) -> lock counter -> allocate number -> **`commit_sale(..., label=number)`** -> snapshot -> save. Call-site comment: *the counter is locked after the stock check so a failed check never contends on it; rollback undoes the whole issue, so no number is burned and no stock is touched. The movements are written after the number exists because the ledger is append-only and carries the invoice number.*
-- [ ] **Cancel:** lock invoice → `reverse_sale` → mark cancelled, in the same transaction; the lock-date rule still applies.
-- [ ] **Issue response** carries `stock_warnings: [{item_id, item_name, stock_after}]` when `ALLOW` drove a balance negative.
-- [ ] **Errors** (same envelope as the 1.4.4 gates): `400 INSUFFICIENT_STOCK` with `details: [{item_id, item_name, requested, available, unit}]` and a message such as *"Only 3 PCS of Item X in stock (needs 5)."*; `400 ITEM_INACTIVE`.
-- [ ] **`/invoices/preview/`** adds an advisory, non-locking `stock_check` per tracked line (`available`, `will_go_negative`). It is never authoritative; the issue is.
-- [ ] **New endpoints:** `GET /items/{id}/stock-history/` (paginated; filters `movement_type`, dates); `POST /items/{id}/adjust-stock/`; `GET /stock/movements/` (business-wide, same filters + `item`); `GET /items/?negative_stock=true`. All tenant-scoped via `TenantModelViewSet`; no update/delete routes exist for movements.
-- [ ] **Tests (SQLite):** issue deducts exactly; services, free-text and untracked items untouched; same item on two lines aggregated for the sufficiency check; **`BLOCK` failure leaves everything unchanged** — invoice still `DRAFT`, `InvoiceCounter.last_number` unchanged, stock unchanged, zero movements; `ALLOW` goes negative with warnings; cancel restores exactly; cancel twice → no double restore; pre-cutover invoice cancel leaves stock alone; soft-deleted item at issue; `PERIOD_LOCKED`; `STOCK_READ_ONLY`; `UNIT_LOCKED`; tenant isolation for history, movements and adjust-stock (cross-tenant item → 404); **literal-URL tests** (never `reverse()`).
-- [ ] **Concurrency tests (PostgreSQL, run in CI — `TransactionTestCase` + threads):**
+- [X] **Issue order (one `@transaction.atomic`):** lock invoice -> status check -> recalc and gates (incl. 2.0.4 `PERIOD_LOCKED`) -> **`reserve_sale`** (locks items ascending, checks, no writes) -> lock counter -> allocate number -> **`commit_sale(..., label=number)`** -> snapshot -> save. Call-site comment: *the counter is locked after the stock check so a failed check never contends on it; rollback undoes the whole issue, so no number is burned and no stock is touched. The movements are written after the number exists because the ledger is append-only and carries the invoice number.*
+- [X] **Cancel:** lock invoice → `reverse_sale` → mark cancelled, in the same transaction; the lock-date rule still applies.
+- [X] **Issue response** carries `stock_warnings: [{item_id, item_name, stock_after}]` when `ALLOW` drove a balance negative.
+- [X] **Errors** (same envelope as the 1.4.4 gates): `400 INSUFFICIENT_STOCK` with `details: [{item_id, item_name, requested, available, unit}]` and a message such as *"Only 3 PCS of Item X in stock (needs 5)."*; `400 ITEM_INACTIVE`.
+- [X] **`/invoices/preview/`** adds an advisory, non-locking `stock_check` per tracked line (`available`, `will_go_negative`). It is never authoritative; the issue is.
+- [X] **New endpoints:** `GET /items/{id}/stock-history/` (paginated; filters `movement_type`, dates); `POST /items/{id}/adjust-stock/`; `GET /stock/movements/` (business-wide, same filters + `item`); `GET /items/?negative_stock=true`. All tenant-scoped via `TenantModelViewSet`; no update/delete routes exist for movements.
+- [X] **Tests (SQLite):** issue deducts exactly; services, free-text and untracked items untouched; same item on two lines aggregated for the sufficiency check; **`BLOCK` failure leaves everything unchanged** — invoice still `DRAFT`, `InvoiceCounter.last_number` unchanged, stock unchanged, zero movements; `ALLOW` goes negative with warnings; cancel restores exactly; cancel twice → no double restore; pre-cutover invoice cancel leaves stock alone; soft-deleted item at issue; `PERIOD_LOCKED`; `STOCK_READ_ONLY`; `UNIT_LOCKED`; tenant isolation for history, movements and adjust-stock (cross-tenant item → 404); **literal-URL tests** (never `reverse()`).
+- [X] **Concurrency tests (PostgreSQL, run in CI — `TransactionTestCase` + threads):**
   - two invoices racing for the **last unit** under `BLOCK` → exactly one succeeds, the other gets `INSUFFICIENT_STOCK`, stock is `0` (never `−1`), only one number consumed;
   - invoices with items in **opposite line order** (A,B vs B,A) → both complete, no deadlock;
   - issue vs `adjust-stock` on the same item → ledger and cache agree afterwards;
   - cancel fired twice concurrently → exactly one reversal;
   - a 20-thread mixed storm of issues, cancels and adjustments, then `reconcile_stock` **and** `audit_invoices` both exit 0.
   - Skip with a loud message when the backend has no `select_for_update` (as in 1.4.4).
-- [ ] **Property test:** a seeded random sequence of issue / cancel / adjust operations keeps `current_stock == Σ movements` after every step, and under `BLOCK` never goes below zero. Print the seed on failure.
+- [X] **Property test:** a seeded random sequence of issue / cancel / adjust operations keeps `current_stock == Σ movements` after every step, and under `BLOCK` never goes below zero. Print the seed on failure.
+
+> **Status:** Done. Two bugs were found by these tests rather than by review, which is the point of writing them:
+>
+> 1. `adjust_stock` and `set_tracking` called `select_for_update()` **outside a transaction** - a 500 on PostgreSQL, silently fine on SQLite. Both are now wrapped in `transaction.atomic`.
+> 2. The custom exception handler rewrote `response.data` and **discarded the `details` array**, so `INSUFFICIENT_STOCK` arrived with no idea which item was short.
+>
+> The concurrency suite is PostgreSQL-only and skips loudly on SQLite, where `select_for_update()` is a no-op and the tests would pass without proving anything. Verified on real PostgreSQL: 14 tests, clean teardown. **The behavioural race tests alone do not catch a missing lock** - verified by removing `select_for_update()`, after which they still passed, because threads rarely collide inside the few hundred microseconds between check and write. `LockIsActuallyRequestedTests` asserts the SQL really contains `FOR UPDATE`, which is deterministic; CI also runs a mutation guard for it. The property test catches a 0.001 drift at step 0 and prints the seed for replay.
 
 #### 2.1.5 Step E — Frontend
 
-- [ ] **Items page:** stock column read-only; **"Adjust stock"** modal (Set to / Change by, reason, note; shows *before → after*); **"Stock history"** drawer (type badge, signed quantity, running balance, source label); "Track stock" checkbox and opening-stock field (create only); unit-locked message; a negative-stock banner when any item is below zero.
-- [ ] **Billing form:** per-line stock badge from the item search payload; amber warning when quantity exceeds available (*"stock will go to −2"*); under `BLOCK` a red *"will be rejected"* — the server still decides. Handle `INSUFFICIENT_STOCK` by highlighting the offending lines using `details`; after a successful issue, toast any `stock_warnings`.
-- [ ] **Profile:** negative-stock policy toggle with the explanation from decision 33.
+- [X] **Items page:** stock column read-only; **"Adjust stock"** modal (Set to / Change by, reason, note; shows *before → after*); **"Stock history"** drawer (type badge, signed quantity, running balance, source label); "Track stock" checkbox and opening-stock field (create only); unit-locked message; a negative-stock banner when any item is below zero.
+- [X] **Billing form:** per-line stock badge from the item search payload; amber warning when quantity exceeds available (*"stock will go to −2"*); under `BLOCK` a red *"will be rejected"* — the server still decides. Handle `INSUFFICIENT_STOCK` by highlighting the offending lines using `details`; after a successful issue, toast any `stock_warnings`.
+- [X] **Profile:** negative-stock policy toggle with the explanation from decision 33.
+- [X] **Automated frontend tests** (`Web_Frontend/tests/stock_ui.test.js`, jsdom + `node:test`, 20 tests, wired into CI). `node --check` only proves a file parses, and every bug worth catching in this UI is a wording or wiring bug — a badge reading "in stock" when stock is short, `NaN` in a preview, a highlight on the wrong line — all of which parse perfectly. Verified by mutation: forcing the badge's healthy branch fails several of the tests.
 - [ ] **Done when:** extend `docs/QA_CHECKLIST.md` and sign it off **in a real browser**: sell the last unit from two browser tabs; adjust stock; cancel and see it restored; read the history; run `reconcile_stock` and `audit_invoices` afterwards.
+
+> **Speed of the test loop (measured, not estimated):** `manage.py test apps` took 63s. Timing
+> every module separately showed `apps.invoices.tests.test_contract` was 54s of that — 9 tests
+> against the other 677 taking 9s between them. The cause is `LiveServerTestCase` (per-test commit
+> plus a socket server on its own thread); two plausible-sounding guesses, the 2.0.5 `DatabaseCache`
+> and `serialized_rollback`, were tested and ruled out. The class is now tagged `contract`, the full
+> suite runs `--exclude-tag=contract`, and CI's existing `contract-smoke` job runs `--tag=contract`.
+> The job already ran them, so this removes a genuine duplicate rather than any coverage.
+> **`test`: 677 tests / 11s. `test-all`: 686 tests / 65s.** Run either with `.\dev.ps1`.
+
+> **Status:** Code and automated tests complete. The **real-browser sign-off is NOT done** — no
+> browser or Playwright runner exists in this environment, so the checklist above stays unticked. Do
+> not treat 2.1.5 as finished until someone has run it against a running server.
 
 #### 2.1.6 Deliberately out of scope
 
-- [ ] Purchases / stock-in → **2.2**. Sales returns, debit notes → **2.4**.
-- [ ] **Stock valuation and COGS** (FIFO / weighted average). Until this exists, any "net profit" figure in 3.3 is a cash-basis estimate and must be labelled so (see the 3.3 patch).
-- [ ] Batch / expiry / serial numbers, multiple godowns, stock transfers, unit conversion (dozen ↔ piece), reorder suggestions, barcode scanning, bills of materials.
+- [X] Purchases / stock-in → **2.2**. Sales returns, debit notes → **2.4**.
+- [X] **Stock valuation and COGS** (FIFO / weighted average). Until this exists, any "net profit" figure in 3.3 is a cash-basis estimate and must be labelled so (see the 3.3 patch).
+- [X] Batch / expiry / serial numbers, multiple godowns, stock transfers, unit conversion (dozen ↔ piece), reorder suggestions, barcode scanning, bills of materials.
 
 #### 2.1.7 Decision log
 
@@ -1052,21 +1093,52 @@ what the balance became.
 
 ---
 
-### 2.2 Purchase Management Module — decision level (expand to steps when reached)
+### 2.2 Purchase Management Module — **planned, not started**
 
 These are locked now because each one prevents a known mistake.
 
 - [ ] **Lifecycle mirrors invoices:** `DRAFT` → `POSTED` → `CANCELLED`. Stock increases on **POST** through the same ledger (`PURCHASE` / `PURCHASE_REVERSAL`, same lock order, same idempotency).
 - [ ] **Amounts are entered as printed on the supplier's bill**, not computed. The supplier's rounding can differ by a paisa and your input-tax credit must match their return. `calculate_invoice()` becomes a *validator*: a mismatch above ₹1 shows a warning, it does not overwrite.
 - [ ] **Calculator needs an `origin_state` parameter** (supplier state for purchases; place of supply = the business state). Refactor backwards-compatibly: sales keep `origin = business`.
-- [ ] **Duplicate-entry guard:** unique `(business, supplier, supplier_bill_number, FY)`. Optional internal reference series `PUR/YY-YY/NNNNN`.
+- [ ] **Duplicate-entry guard:** unique `(business, supplier, supplier_bill_number, FY)`.
 - [ ] **`itc_eligible` per line** (default True), so 4.2 can total claimable credit later; blocked-credit rules are out of scope.
 - [ ] **Cancelling a bill reverses an increase**, so it can drive stock negative: it obeys `negative_stock_policy` (`CANCEL_WOULD_GO_NEGATIVE` under `BLOCK`). It also obeys the lock date (2.0.4).
 - [ ] **No silent price overwrite:** `Item.purchase_price` is updated only if the user ticks "update item purchase price".
-- [ ] **Supplier attachments:** private storage with authenticated URLs; PDF/JPG/PNG, ≤ 5 MB.
 - [ ] **Free-text lines** (freight, misc) allowed; they never touch stock.
 - [ ] **Composition / unregistered suppliers** issue bills with no tax and give no input credit: warn when the supplier has no GSTIN. `Party` has no registration type yet — add one when this is built.
 - [ ] **Reverse charge on purchases** and debit notes for purchase returns → deferred (2.4).
+
+#### Decisions taken (2026-10-12), which close the three open questions above
+
+| Question | Resolution |
+|---|---|
+| Internal `PUR/YY-YY/NNNNN` series? | **No.** The supplier's bill number is the only identifier. |
+| Store the calculator's figures too? | **Yes** — `*_computed` columns beside the entered ones, plus `max_divergence` / `has_divergence`. |
+| Supplier bill attachments? | **Deferred.** Nothing to build now. |
+| Delivery shape? | One pass, all steps, then a single report. |
+
+**Why no internal series.** The earlier draft called it "optional", and it is now dropped outright. The requirement that actually exists is the duplicate-entry guard, and a unique constraint on `(business, supplier, bill_number, financial_year)` enforces it completely. An internal series would have forced a `series` column on `InvoiceCounter` and a rewrite of its `(business, financial_year)` uniqueness — real migration risk, and a column on every counter row, to produce a number nothing reads.
+
+**Why store both figures.** Entered amounts are the truth (decision above), but a discarded computed figure is a discarded discrepancy. Storing both means `audit_purchases` can later answer *"was this supplier's rounding a one-off, or do they do it every month?"* — which is the question that matters when the 4.2 GSTR-3B figures have to reconcile. Cost: the money fields are doubled on `Purchase` and `PurchaseItem`. Accepted knowingly, not overlooked.
+
+**Why attachments are deferred, and the catch.** The spec asked for private storage with authenticated URLs. This project stores media on **Cloudinary**, which is a public CDN by default — so "private" means a delivery-type change plus a signed-URL endpoint, not a `FileField`. Shipping it on the existing storage would have put supplier bills (bank details, GSTINs) at public URLs. Deferring is the right call; it must not later be "fixed" by adding the field against the default storage.
+
+#### Build steps
+
+- [ ] **A — Schema.** New `apps/purchases`. `Party.gst_registration_type` (`REGULAR`/`COMPOSITION`/`UNREGISTERED`, data migration setting `REGULAR` wherever `gstin` is non-blank). `Purchase` (supplier PROTECT, `bill_number`, **snapshotted `financial_year`**, bill date, status, `origin_state_code` = supplier state snapshot, entered money fields + `*_computed` mirrors, `max_divergence`, `has_divergence`, `update_item_purchase_price`, supplier name/gstin/state/address snapshots, actors). `PurchaseItem` (item PROTECT, same snapshot columns as `InvoiceItem`, entered + `_computed`, `itc_eligible`).
+  - ⚖️ **The FY snapshot is load-bearing.** `(business, supplier, bill_number, financial_year)` cannot be a database constraint on a *derived* value, so `financial_year` is stored, exactly as `InvoiceCounter` already does. It must be written from `bill_date` on every save.
+  - ⚖️ **Do not change `Party.is_registered`.** It is `bool(gstin)` and sales depend on it. The new field is read by purchases only; the data migration keeps the two consistent.
+  - Constraints: the duplicate guard; `quantity > 0`; non-negative money and `tax_rate`; and lifecycle constraints so `POSTED` requires a bill number and timestamp while `DRAFT` carries neither — the shape whose inversion 2.0.7's tests caught twice.
+- [ ] **B — Pure logic, no DB.** (i) Rename `calculate_invoice(business_state=…)` → `origin_state=…`; purchases pass supplier state as origin and business state as place of supply, which is what makes same-state input credit CGST+SGST and cross-state IGST. **Sales callers must all be updated and the sales suite re-run** — this is a keyword rename on a function sales depends on. (ii) `compare_entered_vs_computed()` returning per-line and header diffs flagged above ₹1. Pure like `stock_plan.py`, so its tests run in milliseconds.
+- [ ] **C — Stock ledger.** Generalise `_stock_lines_for_invoice` → `_stock_lines_for_document` (hardcoded to `invoice.items` today). Add `plan_purchase` (no sufficiency check — stock only rises), `reserve_purchase`, `commit_purchase`, `reverse_purchase`, reusing `_lock_items` and the 2.1 lock order. `PURCHASE`/`PURCHASE_REVERSAL` already exist in `MovementType` from 2.1.1; no new enum values needed.
+- [ ] **D — Lifecycle, API, integrity.** Endpoints list/create/retrieve/update/delete, `POST /{id}/post/`, `POST /{id}/cancel/`, `POST /purchases/preview/` (advisory diff), filters by supplier/status/date. Errors `DUPLICATE_BILL_NUMBER` (409), `CANCEL_WOULD_GO_NEGATIVE`, `ITEM_INACTIVE`, plus shared `PERIOD_LOCKED` / `FUTURE_DATE`. ITC rules in the validator: UNREGISTERED or COMPOSITION supplier ⇒ zero tax and no credit, warned not blocked. `audit_purchases` mirroring `audit_invoices`.
+  - ⚖️ `audit_purchases` must **not** flag gaps in bill numbers. Those are the supplier's sequence, not ours; treating them as gaps — as the invoice series check correctly does for our own numbers — would be nonsense.
+- [ ] **E — Frontend, tests, docs.** Purchases page, supplier-filtered party picker, per-line tax split, divergence banner, post/cancel; jsdom tests following the 2.1.5 pattern; PostgreSQL concurrency tests added to the CI `postgres-concurrency` job; QA checklist section; `preflight_constraints` picks the new constraints up automatically because it derives from `_meta`.
+
+> **Status: planned, awaiting go-ahead. Nothing in 2.2 has been built.** Steps A–E are unchecked on
+> purpose. Two risks worth knowing before it starts, since it will run as one pass: step B renames a
+> keyword argument on a function the sales path depends on, and step C changes a function 2.1's tests
+> exercise. Both are testable, but a wrong call in either would be discovered late.
 
 ### 2.3 PDF Generation Engine & Document Sharing — decision level
 

@@ -79,6 +79,7 @@ def make_item(
     tax_rate="5.00",
     hsn="610510",
     unit="PCS",
+    track_stock=True,
 ):
     return Item.objects.create(
         business=user.business,
@@ -91,6 +92,10 @@ def make_item(
         tax_rate=Decimal(tax_rate),
         current_stock=Decimal("100.000"),
         low_stock_threshold=Decimal("5.000"),
+        # Explicit since 2.0.6. Without it a product is "untracked" and the
+        # 2.1 ledger skips it entirely, so these invoice fixtures would sell
+        # stock they never move.
+        track_stock=track_stock and item_type == Item.ItemType.PRODUCT,
     )
 
 

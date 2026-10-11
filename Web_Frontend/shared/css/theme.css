@@ -222,6 +222,10 @@ input[type="search"]::-webkit-search-cancel-button { display: none; }
 .toast { padding: 0.75rem 1rem; border: 1px solid; border-radius: 0.625rem; font-size: 0.875rem; font-weight: 500; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.15); animation: toast-in 0.2s ease; }
 .toast-success { background: #ECFDF5; border-color: #A7F3D0; color: #065F46; }
 .toast-error { background: #FEF2F2; border-color: #FECACA; color: #991B1B; }
+/* Warning is not an error but not fine either: the invoice went through and
+   something still needs attention (2.1.4's stock_warnings). Amber keeps it
+   visually distinct from both success and failure. */
+.toast-warning { background: #FFFBEB; border-color: #FDE68A; color: #92400E; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
 
 @media (prefers-reduced-motion: reduce) {

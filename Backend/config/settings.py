@@ -129,6 +129,44 @@ DATABASES = {
     )
 }
 
+# Neon's pooled endpoint uses TRANSACTION pooling, which breaks server-side
+# cursors: Postgres will not keep a cursor alive across transaction boundaries.
+# Django's `.iterator()` uses them, so through the pooler the 4.2 exports fail
+# with an opaque "cursor does not exist".
+#
+# Force client-side cursors on PostgreSQL. (`DISABLE_SERVER_SIDE_CURSORS` is the
+# **psycopg2** spelling and does not exist in psycopg3, which this project uses -
+# passing it to `dj_database_url.config()` is a TypeError at import time. With
+# psycopg3 the supported route is Django's `OPTIONS["cursor_factory"]`.)
+if os.getenv("DATABASE_URL", "").startswith("postgres"):
+    from psycopg import ClientCursor
+
+    _options = dict(DATABASES["default"].get("OPTIONS") or {})
+    _options["cursor_factory"] = ClientCursor
+    DATABASES["default"]["OPTIONS"] = _options
+
+# ---------------------------------------------------------------------------
+# Cache (decision 24)
+# ---------------------------------------------------------------------------
+# The throttle counters live in the cache, so this decides where rate-limit
+# state is kept. Django's default `LocMemCache` is **per process**: it resets on
+# every deploy, and with more than one worker each worker counts separately, so
+# a user gets N times the intended rate and a deploy wipes every counter.
+#
+# `DatabaseCache` needs one-time setup:
+#     python manage.py createcachetable
+# The cache table is created by a migration in `apps.core`, so a fresh database
+# has it without any manual step.
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.db.DatabaseCache",
+        "LOCATION": "django_cache",
+        # Never let the cache itself become an outage: if the table is missing
+        # the app must still boot, and throttling degrades rather than 500s.
+        "TIMEOUT": 300,
+    }
+}
+
 
 # ---------------------------------------------------------------------------
 # Passwords, language, time
@@ -177,6 +215,20 @@ if os.getenv("CLOUDINARY_URL"):
 # Django REST Framework + JWT
 # ---------------------------------------------------------------------------
 REST_FRAMEWORK = {
+    # How many proxy hops to trust when reading X-Forwarded-For for the client's
+    # IP (the throttle key and the "signed in from" label both use it).
+    #
+    # Render sits in front of us and forwards the real client IP in
+    # X-Forwarded-For, so without this DRF sees the *proxy's* address and every
+    # anonymous caller shares one bucket: one attacker exhausting `anon` locks
+    # out every login on the platform. One hop is correct for a single CDN/proxy
+    # in front of the app.
+    #
+    # **Verify this on the deployed service** (1.4.9 finding #14): a wrong value
+    # fails silently, and the wrong direction lets a client spoof the header to
+    # escape throttling entirely. Log X-Forwarded-For once from a staging
+    # request and confirm it holds exactly one address.
+    "NUM_PROXIES": 1,
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
@@ -186,7 +238,7 @@ REST_FRAMEWORK = {
     # JSON only, with no browsable HTML API. Matches the API-first rule.
     "DEFAULT_RENDERER_CLASSES": ("rest_framework.renderers.JSONRenderer",),
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
-    "EXCEPTION_HANDLER": "config.exceptions.api_exception_handler",
+    "EXCEPTION_HANDLER": "config.exceptions.throttle_exception_handler",
     "PAGE_SIZE": 20,
     # Throttling. Applied globally; a view opts into a stricter named rate with
     # `throttle_scope`. POST /invoices/preview/ runs the whole GST calculation on
@@ -198,13 +250,18 @@ REST_FRAMEWORK = {
     ),
     "DEFAULT_THROTTLE_RATES": {
         "anon": "60/hour",      # unauthenticated (register / login)
-        "user": "600/hour",     # signed-in browsing and normal CRUD
+        # Raised from 600/hour in 2.0.5 (decision 24). 600/hour is 10 requests
+        # per minute across EVERY endpoint, and item/party autocomplete alone
+        # exhausts it - a cashier gets locked out mid-invoice, which is worse
+        # than a slightly looser brute-force limit on an endpoint that already
+        # has its own tighter scopes.
+        "user": "5000/hour",
         # Applied to every unauthenticated auth endpoint: login, register and
         # token refresh. Added in 2.0.5 - `login` and `preview` already had
         # scopes, but register and refresh had none and fell through to `anon`
         # (1.4.9 finding #3).
         "auth": "10/minute",
-        "login": "10/minute",   # brute-force protection
+        "login": "10/minute",   # kept for backwards compatibility with decision 18's tests
         "preview": "120/minute",
     },
 }

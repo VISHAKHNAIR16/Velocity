@@ -46,11 +46,15 @@ class ItemQuerySet(TenantQuerySet):
         return self.filter(is_active=True)
 
     def stock_tracked(self):
-        """Products that actually carry a stock quantity."""
-        return self.filter(
-            item_type=Item.ItemType.PRODUCT,
-            current_stock__isnull=False,
-        )
+        """
+        Items that carry a stock quantity.
+
+        One definition, shared with the `Item.tracks_stock` property: the
+        explicit `track_stock` flag (decision 25). This used to be
+        `item_type=PRODUCT AND current_stock IS NOT NULL`, which disagreed with
+        the property's `item_type == PRODUCT`.
+        """
+        return self.filter(track_stock=True)
 
     def low_stock(self):
         """Stock-tracked products at or below their low-stock threshold."""
@@ -60,19 +64,36 @@ class ItemQuerySet(TenantQuerySet):
         )
 
 
+class ItemType(models.TextChoices):
+    """
+    Module level, not nested inside `Item`.
+
+    The stock constraints added in 2.0.6 reference `ItemType.PRODUCT` from
+    `Item.Meta`, and a nested class is not bound while its own class body is
+    still executing. Promoted out so the constraints can use the real enum
+    rather than a string literal that a typo would silently defeat.
+
+    `Item.ItemType` is kept as an alias below, so every existing
+    `Item.ItemType.PRODUCT` reference keeps working.
+    """
+
+    PRODUCT = "PRODUCT", "Product"
+    SERVICE = "SERVICE", "Service"
+
+
 class Item(TenantModel):
     """
     A product or service belonging to a business.
 
-    Money is always `Decimal(12, 2)`. Stock is `Decimal(12, 3)` and is **NULL**
-    for services: `NULL` means "not stock-tracked", which is different from
-    `0` ("tracked, and none left"). Phase 2.1 must therefore gate stock maths
-    on `tracks_stock` rather than comparing against zero.
+    Money is always `Decimal(12, 2)`. Stock is `Decimal(12, 3)`. Whether an item
+    has a stock quantity at all is decided by the explicit `track_stock` flag
+    (decision 25); `NULL` in `current_stock` therefore means "not tracked", which
+    is different from `0` ("tracked, and none left"). Phase 2.1 must gate stock
+    maths on `tracks_stock` rather than comparing against zero.
     """
 
-    class ItemType(models.TextChoices):
-        PRODUCT = "PRODUCT", "Product"
-        SERVICE = "SERVICE", "Service"
+    #: Back-compat alias. `Item.ItemType.PRODUCT` is used across the codebase.
+    ItemType = ItemType
 
     NON_NEGATIVE = [MinValueValidator(Decimal("0.00"))]
 
@@ -147,14 +168,32 @@ class Item(TenantModel):
         help_text="Applicable GST rate as a percentage.",
     )
 
-    # --- Stock (quantities: Decimal(12, 3), NULL for services) ---
+    # --- Stock (quantities: Decimal(12, 3), NULL when untracked) ---
+    #
+    # `track_stock` is the ONE definition of "this item has a stock quantity"
+    # (decision 25). Before this, the model property said "is a PRODUCT" while
+    # the queryset said "is a PRODUCT *and* current_stock is not null" - so a
+    # product saved with blank stock was "tracked" to one and "untracked" to the
+    # other, and 2.1's `current_stock - quantity` on a NULL would 500 on issue.
+    #
+    # The implicit "NULL means untracked" convention also let a shop skip its
+    # opening stock and silently never have stock move, with nothing to tell it.
+    # Being explicit means the shop has to decide, and the decision is visible.
+    track_stock = models.BooleanField(
+        default=False,
+        help_text=(
+            "Track a stock quantity for this item. Always False for a SERVICE. "
+            "For a PRODUCT, turning this off nulls the stock fields so 'no stock "
+            "recorded' cannot be mistaken for 'zero stock'."
+        ),
+    )
     current_stock = models.DecimalField(
         max_digits=12,
         decimal_places=3,
         null=True,
         blank=True,
         validators=[MinValueValidator(Decimal("0.000"))],
-        help_text="Quantity on hand. NULL for services (not stock-tracked).",
+        help_text="Quantity on hand. NULL when stock is not tracked.",
     )
     low_stock_threshold = models.DecimalField(
         max_digits=12,
@@ -206,6 +245,29 @@ class Item(TenantModel):
                 condition=models.Q(barcode__gt="", is_active=True),
                 name="unique_barcode_per_business",
             ),
+            # A tracked item MUST carry a quantity. Without this, "tracked but
+            # null" is representable and 2.1's arithmetic on it fails at issue
+            # time rather than at save time.
+            #
+            # Note this permits a negative `current_stock`: under the ALLOW
+            # negative-stock policy (decision 33) a sale can legitimately drive
+            # the balance below zero. The constraint is about *tracking*, not
+            # about the balance being non-negative.
+            models.CheckConstraint(
+                condition=(
+                    models.Q(track_stock=False)
+                    | (
+                        models.Q(item_type=ItemType.PRODUCT)
+                        & models.Q(current_stock__isnull=False)
+                    )
+                ),
+                name="tracked_item_must_be_product_with_stock",
+            ),
+            # A SERVICE can never be stock-tracked, whatever the serializer sent.
+            models.CheckConstraint(
+                condition=models.Q(item_type=ItemType.PRODUCT) | models.Q(track_stock=False),
+                name="service_is_never_stock_tracked",
+            ),
         ]
 
     def __str__(self) -> str:
@@ -216,8 +278,15 @@ class Item(TenantModel):
     # ------------------------------------------------------------------
     @property
     def tracks_stock(self) -> bool:
-        """True when this item carries a stock quantity (products only)."""
-        return self.item_type == self.ItemType.PRODUCT
+        """
+        True when this item carries a stock quantity.
+
+        Now a straight read of the flag, so it can never disagree with
+        `Item.objects.stock_tracked()` - which is what decision 25 fixed. It was
+        previously `item_type == PRODUCT`, which said a product with no stock
+        value was tracked while the queryset excluded it.
+        """
+        return bool(self.track_stock)
 
     @property
     def is_low_stock(self) -> bool:
@@ -246,3 +315,16 @@ class Item(TenantModel):
         from apps.core.constants import gst_rate_label
 
         return gst_rate_label(self.tax_rate)
+
+
+# The stock ledger lives in its own module (2.1.1) because it is a substantial,
+# self-contained concern - append-only semantics, its own idempotency rule, and a
+# module docstring explaining why it holds no FK back to invoices. Importing it
+# here registers `StockMovement` with this app, which is why it must be at the
+# END of the file: it imports `TenantModel` and this module defines `Item`.
+from .models_stock import (  # noqa: E402,F401
+    AdjustmentReason,
+    MovementType,
+    SourceType,
+    StockMovement,
+)

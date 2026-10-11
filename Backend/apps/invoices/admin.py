@@ -30,6 +30,24 @@ class InvoiceItemInline(admin.TabularInline):
     max_num = 0
     can_delete = False
 
+    #: Every field above. A line's identity and its snapshot must not be
+    #: editable by hand: changing `quantity` or `unit_price` here would leave the
+    #: stored money columns inconsistent with the inputs, and 2.0.8's
+    #: `audit_invoices` would report the invoice as corrupt.
+    ALL_FIELDS = readonly_fields + (
+        "item_name", "item_type", "hsn_sac_code", "unit", "service_description",
+        "quantity", "unit_price", "line_discount", "tax_rate",
+    )
+
+    def get_readonly_fields(self, request, obj=None):
+        """Frozen once the parent invoice is no longer a draft."""
+        if obj is not None and obj.status != Invoice.Status.DRAFT:
+            return self.ALL_FIELDS
+        # On a draft, keep the computed columns read-only but let a DBA correct
+        # the inputs - they then know the totals are stale, and `audit_invoices`
+        # will say so.
+        return self.readonly_fields
+
 
 @admin.register(Invoice)
 class InvoiceAdmin(admin.ModelAdmin):
