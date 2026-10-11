@@ -1093,7 +1093,7 @@ what the balance became.
 
 ---
 
-### 2.2 Purchase Management Module — **planned, not started**
+### 2.2 Purchase Management Module — **built**
 
 These are locked now because each one prevents a known mistake.
 
@@ -1125,20 +1125,59 @@ These are locked now because each one prevents a known mistake.
 
 #### Build steps
 
-- [ ] **A — Schema.** New `apps/purchases`. `Party.gst_registration_type` (`REGULAR`/`COMPOSITION`/`UNREGISTERED`, data migration setting `REGULAR` wherever `gstin` is non-blank). `Purchase` (supplier PROTECT, `bill_number`, **snapshotted `financial_year`**, bill date, status, `origin_state_code` = supplier state snapshot, entered money fields + `*_computed` mirrors, `max_divergence`, `has_divergence`, `update_item_purchase_price`, supplier name/gstin/state/address snapshots, actors). `PurchaseItem` (item PROTECT, same snapshot columns as `InvoiceItem`, entered + `_computed`, `itc_eligible`).
+- [X] **A — Schema.** New `apps/purchases`. `Party.gst_registration_type` (`REGULAR`/`COMPOSITION`/`UNREGISTERED`, data migration setting `REGULAR` wherever `gstin` is non-blank). `Purchase` (supplier PROTECT, `bill_number`, **snapshotted `financial_year`**, bill date, status, `origin_state_code` = supplier state snapshot, entered money fields + `*_computed` mirrors, `max_divergence`, `has_divergence`, `update_item_purchase_price`, supplier name/gstin/state/address snapshots, actors). `PurchaseItem` (item PROTECT, same snapshot columns as `InvoiceItem`, entered + `_computed`, `itc_eligible`).
   - ⚖️ **The FY snapshot is load-bearing.** `(business, supplier, bill_number, financial_year)` cannot be a database constraint on a *derived* value, so `financial_year` is stored, exactly as `InvoiceCounter` already does. It must be written from `bill_date` on every save.
   - ⚖️ **Do not change `Party.is_registered`.** It is `bool(gstin)` and sales depend on it. The new field is read by purchases only; the data migration keeps the two consistent.
   - Constraints: the duplicate guard; `quantity > 0`; non-negative money and `tax_rate`; and lifecycle constraints so `POSTED` requires a bill number and timestamp while `DRAFT` carries neither — the shape whose inversion 2.0.7's tests caught twice.
-- [ ] **B — Pure logic, no DB.** (i) Rename `calculate_invoice(business_state=…)` → `origin_state=…`; purchases pass supplier state as origin and business state as place of supply, which is what makes same-state input credit CGST+SGST and cross-state IGST. **Sales callers must all be updated and the sales suite re-run** — this is a keyword rename on a function sales depends on. (ii) `compare_entered_vs_computed()` returning per-line and header diffs flagged above ₹1. Pure like `stock_plan.py`, so its tests run in milliseconds.
-- [ ] **C — Stock ledger.** Generalise `_stock_lines_for_invoice` → `_stock_lines_for_document` (hardcoded to `invoice.items` today). Add `plan_purchase` (no sufficiency check — stock only rises), `reserve_purchase`, `commit_purchase`, `reverse_purchase`, reusing `_lock_items` and the 2.1 lock order. `PURCHASE`/`PURCHASE_REVERSAL` already exist in `MovementType` from 2.1.1; no new enum values needed.
-- [ ] **D — Lifecycle, API, integrity.** Endpoints list/create/retrieve/update/delete, `POST /{id}/post/`, `POST /{id}/cancel/`, `POST /purchases/preview/` (advisory diff), filters by supplier/status/date. Errors `DUPLICATE_BILL_NUMBER` (409), `CANCEL_WOULD_GO_NEGATIVE`, `ITEM_INACTIVE`, plus shared `PERIOD_LOCKED` / `FUTURE_DATE`. ITC rules in the validator: UNREGISTERED or COMPOSITION supplier ⇒ zero tax and no credit, warned not blocked. `audit_purchases` mirroring `audit_invoices`.
+- [X] **B — Pure logic, no DB.** (i) Rename `calculate_invoice(business_state=…)` → `origin_state=…`; purchases pass supplier state as origin and business state as place of supply, which is what makes same-state input credit CGST+SGST and cross-state IGST. **Sales callers must all be updated and the sales suite re-run** — this is a keyword rename on a function sales depends on. (ii) `compare_entered_vs_computed()` returning per-line and header diffs flagged above ₹1. Pure like `stock_plan.py`, so its tests run in milliseconds.
+- [X] **C — Stock ledger.** Generalise `_stock_lines_for_invoice` → `_stock_lines_for_document` (hardcoded to `invoice.items` today). Add `plan_purchase` (no sufficiency check — stock only rises), `reserve_purchase`, `commit_purchase`, `reverse_purchase`, reusing `_lock_items` and the 2.1 lock order. `PURCHASE`/`PURCHASE_REVERSAL` already exist in `MovementType` from 2.1.1; no new enum values needed.
+- [X] **D — Lifecycle, API, integrity.** Endpoints list/create/retrieve/update/delete, `POST /{id}/post/`, `POST /{id}/cancel/`, `POST /purchases/preview/` (advisory diff), filters by supplier/status/date. Errors `DUPLICATE_BILL_NUMBER` (409), `CANCEL_WOULD_GO_NEGATIVE`, `ITEM_INACTIVE`, plus shared `PERIOD_LOCKED` / `FUTURE_DATE`. ITC rules in the validator: UNREGISTERED or COMPOSITION supplier ⇒ zero tax and no credit, warned not blocked. `audit_purchases` mirroring `audit_invoices`.
   - ⚖️ `audit_purchases` must **not** flag gaps in bill numbers. Those are the supplier's sequence, not ours; treating them as gaps — as the invoice series check correctly does for our own numbers — would be nonsense.
-- [ ] **E — Frontend, tests, docs.** Purchases page, supplier-filtered party picker, per-line tax split, divergence banner, post/cancel; jsdom tests following the 2.1.5 pattern; PostgreSQL concurrency tests added to the CI `postgres-concurrency` job; QA checklist section; `preflight_constraints` picks the new constraints up automatically because it derives from `_meta`.
+- [X] **E — Frontend, tests, docs.** Purchases page, supplier-filtered party picker, per-line tax split, divergence banner, post/cancel; jsdom tests following the 2.1.5 pattern; PostgreSQL concurrency tests added to the CI `postgres-concurrency` job; QA checklist section; `preflight_constraints` picks the new constraints up automatically because it derives from `_meta`.
 
-> **Status: planned, awaiting go-ahead. Nothing in 2.2 has been built.** Steps A–E are unchecked on
-> purpose. Two risks worth knowing before it starts, since it will run as one pass: step B renames a
-> keyword argument on a function the sales path depends on, and step C changes a function 2.1's tests
-> exercise. Both are testable, but a wrong call in either would be discovered late.
+> **Status: BUILT (2026-10-12). Steps A-E are done; every checkbox above is now ticked.**
+>
+> **Step A** - new `apps/purchases` (`Purchase`, `PurchaseItem`), 14 constraints, 2 migrations.
+> `Party.gst_registration_type` added with a data migration backfilling `REGULAR` wherever a GSTIN
+> exists, so the new field never contradicts `is_registered`. `financial_year` is stored on the bill,
+> not derived - a `UniqueConstraint` cannot contain a derived expression, and a Python-only duplicate
+> check loses to a race, which is the one mistake this guard exists to stop.
+>
+> **Step B** - `calculate_invoice(business_state=)` renamed to `origin_state=`, with all four sales
+> call sites updated and the sales suite re-run (461 tests) to prove no drift. New pure
+> `divergence.py` comparing entered against computed, tolerance Rs 1.
+>
+> **Step C** - `_stock_lines_for_invoice` generalised to `_stock_lines_for_document`; added
+> `reserve_purchase` / `commit_purchase` / `reverse_purchase` / `check_purchase_cancellation`.
+> `PURCHASE` and `PURCHASE_REVERSAL` already existed from 2.1.1; no new enum values.
+>
+> **Step D** - lifecycle service, serializers, API (`/purchases/` CRUD, `/post/`, `/cancel/`,
+> `/preview/`, `/stock-effect/`), `audit_purchases`, admin. ITC rules: an unregistered or composition
+> supplier's bill must carry no tax, and `audit_purchases` reports `TAX_ON_UNREGISTERED_BILL` if it does.
+>
+> **Step E** - purchases page, nav link, 10 jsdom tests, CI job wiring, this section.
+>
+> ### Three bugs this build found, all by tests rather than review
+>
+> 1. **Two `CheckConstraint`s were written inverted.** `cancelled_purchase_has_timestamp_and_reason`
+>    read `Q(status="CANCELLED") | ...`, which permits the *absence* of data on any status - the same
+>    inversion 2.0.7 hit twice. And `draft_purchase_has_no_posted_at` was likewise backwards. Both are
+>    now `~Q(status=...) | ...`, which is the shape the invoice constraints use.
+> 2. **`preflight_constraints --app purchases` silently checked nothing.** It compared
+>    `model._meta.app_label` ("purchases") against a set built from `_meta.label`
+>    ("purchases.Purchase"). The command printed "all clear" having verified nothing - precisely the
+>    failure mode it exists to prevent, reintroduced by my own filter.
+> 3. **`assert_period_open` raised `IssueError`, which the purchase view did not catch**, so a
+>    locked-period refusal was a 500 rather than a 400.
+>
+> ### The concurrency asymmetry worth remembering
+>
+> Two bills for the same item posted at once must **both** apply - the goods genuinely arrived twice,
+> so a second increase is correct, and dropping one bill would quietly lose stock. That is the
+> opposite of the 2.1.4 sale race, where exactly one of two invoices must win. The dangerous direction
+> is cancellation, which *removes* stock and must reverse exactly once.
+>
+> **Not done:** real-browser sign-off. `docs/QA_CHECKLIST.md` section 6 is written and unticked.
 
 ### 2.3 PDF Generation Engine & Document Sharing — decision level
 

@@ -338,7 +338,7 @@ things that will bite later if they are not recorded.
 - [ ] **Stock unit conversion is out of scope (decision 37) and will look like a bug to users.**
       Selling in dozens against stock in pieces is neither converted nor checked. It needs a real
       conversion model, not a guess. Flag it in the UI before someone files a bug about it.
-- [ ] **Purchases (2.2) must write through the same ledger** (`PURCHASE` / `PURCHASE_REVERSAL`, same
+- [x] **Purchases (2.2) now write through the same ledger** (`PURCHASE` / `PURCHASE_REVERSAL`, same
       lock order, same idempotency). Until then the only ways stock increases are `OPENING` at item
       creation and `Adjust Stock`, and `reconcile_stock` will show drift the moment a shop's real
       process needs stock-in.
@@ -379,3 +379,44 @@ things that will bite later if they are not recorded.
       beyond "`LiveServerTestCase` is expensive"; the per-test cost is ~6s and is not accounted
       for. Not urgent — they run in their own CI job — but a future `contract` tag on a new
       expensive test class would quietly add a minute to every push.
+
+---
+
+## 7. Phase 2.2 (purchases) — follow-ups
+
+- [x] **Amounts are entered, never overwritten.** A purchase bill is transcribed from the supplier's
+      document, so the typed figures are the truth and `calculate_invoice()` became a validator. Both
+      versions are stored (`*_computed` beside the entered ones) and the gap is recorded in
+      `max_divergence`. Verified by mutation: a frontend change that rewrites the typed totals is
+      caught by `purchases.test.js`.
+- [x] **`preflight_constraints` picked up all 14 new purchase constraints with no edit**, going from
+      18 checks to 32. That is the whole argument for deriving the checks from
+      `Model._meta.constraints` instead of a hardcoded list — the script this replaced would have
+      reported "all clear" for every one of them.
+- [ ] ⚠️ **`preflight_constraints --app <name>` was silently checking nothing, and my own filter
+      reintroduced it.** It compared `_meta.app_label` against a set built from `_meta.label`
+      ("purchases" vs "purchases.Purchase"), so the filter never matched and the command printed
+      "all clear" having verified nothing — the exact failure mode it exists to prevent. Now fixed and
+      covered, but it is worth a test for *every* filter this command has, not just the happy path.
+- [x] **The `origin_state` rename is complete and provably safe.** `calculate_invoice(business_state=)`
+      became `origin_state=`; all four call sites moved and the 461-test sales suite was re-run. The
+      risk flagged before starting — a keyword rename on a function sales depends on — did not bite.
+- [x] **Two `CheckConstraint`s were written inverted**, the same shape 2.0.7 hit twice:
+      `Q(status="CANCELLED") | ...` permits the *absence* of data on any status. Both fixed to the
+      `~Q(status=...) | ...` form the invoice constraints use. Third occurrence of this bug in the
+      project: worth writing the lifecycle constraints from the invoice file rather than from memory.
+- [x] **Posting a purchase and posting an invoice are asymmetric under concurrency.** Two bills for
+      the same item posted at once must **both** apply — the goods arrived twice, so dropping one
+      would lose stock. Cancellation is the dangerous direction and must reverse exactly once. A test
+      that assumed "exactly one winner" here would have been wrong in the most expensive direction.
+- [ ] **Reverse charge is still deferred to 2.4**, as specified. A purchase from an unregistered or
+      composition supplier currently cannot carry reverse-charge tax, so a business with such suppliers
+      cannot fully record their input credit.
+- [ ] **`itc_eligible` is stored but nothing consumes it.** 4.2 (GSTR-3B) has to total the claimable
+      credit from it. Until then it is a field that is written and never read, which is exactly the
+      kind of thing that quietly stops matching reality.
+- [ ] **Supplier bill attachments remain deferred.** When they are built they must NOT go on the
+      existing Cloudinary storage: this project stores media on a public CDN by default, and a supplier
+      bill carries bank details and GSTINs.
+- [ ] **The purchase page has no browser sign-off.** `docs/QA_CHECKLIST.md` section 6 is written and
+      unticked, for the same reason as 2.0.9 and 2.1.5 — no browser runner in this environment.

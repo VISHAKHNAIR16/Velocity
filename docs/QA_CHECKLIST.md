@@ -152,6 +152,56 @@ After the run above, both of these must exit 0:
 - [ ] Deleting a user who owns invoices is refused
 - [ ] Closing an account deactivates rather than deletes
 
+## 6. Purchases (2.2)
+
+### 6a. Entering a bill
+
+- [ ] New Purchase opens with a **supplier** picker (suppliers only; walk-ins are excluded)
+- [ ] Typing a bill number already used by that supplier this year is refused, and the message
+      explains why
+- [ ] The same number from a *different* supplier is accepted
+- [ ] **Check Figures** compares your typed totals against the calculator
+- [ ] If they agree it says so in green
+- [ ] If they differ it says **"your numbers will be saved exactly as entered"** — the wording
+      matters: nothing on this page may overwrite a figure you typed
+- [ ] There is no control anywhere that writes the computed figures into the form
+
+### 6b. Stock
+
+- [ ] Posting a bill **increases** stock by the line quantities
+- [ ] A freight / free-text line posts fine and moves **no** stock
+- [ ] Posting twice (double-click) adds the stock **once**
+- [ ] A posted bill's money fields are locked, with a reason shown
+
+### 6c. Cancelling
+
+- [ ] Cancelling takes the stock back
+- [ ] `Stock History` shows **both** rows — the original purchase and the reversal
+- [ ] Cancelling twice removes the stock once
+- [ ] A reason is required
+- [ ] Set the policy to **BLOCK**, sell the goods on, then try to cancel: refused, and the message
+      names **which item** and what the balance would become
+
+### 6d. Two bills, one item (concurrency)
+
+- [ ] Open two tabs, post a bill for the same item in each
+- [ ] **Both** succeed and the stock rises by the sum — goods genuinely arrived twice
+- [ ] `reconcile_stock` reports no drift afterwards
+
+### 6e. Integrity
+
+```
+.\dev.ps1 audit          # audit_purchases
+.\dev.ps1 reconcile
+.\dev.ps1 preflight
+```
+
+- [ ] `audit_purchases` exits 0
+- [ ] Deliberately post a bill whose grand total is wrong: `audit_purchases` reports `DIVERGENCE`
+      and exits 1 — but the bill still saved exactly what you typed
+- [ ] A supplier's bill numbers with a **gap** (SUP-001 then SUP-900) is **not** reported. Only
+      duplicates are.
+
 ---
 
 ## Known gaps — do not tick these
@@ -162,5 +212,6 @@ After the run above, both of these must exit 0:
 - **Unit conversion (dozen ↔ piece) is out of scope for 2.1** by decision 37.
   Selling in a unit other than the item's stock unit is not converted and is not
   checked — do not test it expecting it to work.
-- **Purchases do not exist yet** (2.2). There is no way to put stock *in*
-  except `OPENING` at creation or `Adjust Stock`.
+- **Reverse charge is not implemented** (deferred to 2.4). A bill from an unregistered or
+  composition supplier cannot carry reverse-charge tax.
+- **`itc_eligible` is recorded but nothing uses it yet.** It exists so 4.2 can total claimable credit.

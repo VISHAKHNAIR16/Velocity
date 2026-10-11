@@ -32,7 +32,7 @@ def line(quantity, unit_price, rate, discount="0", item_type="PRODUCT"):
 
 def calc(lines, business="36", pos="36", **kwargs):
     kwargs.setdefault("business_is_regular", True)
-    return calculate_invoice(lines, business_state=business, place_of_supply=pos, **kwargs)
+    return calculate_invoice(lines, origin_state=business, place_of_supply=pos, **kwargs)
 
 
 # ===========================================================================

@@ -203,16 +203,22 @@ def default_place_of_supply(
     return billing_state
 
 
-def resolve_supply(*, business_state: str, place_of_supply: str) -> tuple[str, str]:
+def resolve_supply(*, origin_state: str, place_of_supply: str) -> tuple[str, str]:
     """
     Return `(supply_type, state_tax_label)` for a resolved place of supply.
 
     Intra-state inside a UT without a legislature is CGST + UTGST: same
     arithmetic, different label.
+
+    `origin_state` is the state the goods come FROM, which is not always the
+    business's own state (2.2). It was called `business_state` until then,
+    which read as though sales and purchases shared a starting point - they do
+    not, and for input tax credit the difference decides CGST+SGST versus IGST.
+    Sales pass the business state, so their behaviour is unchanged.
     """
-    business_state = (business_state or "").strip()
+    origin_state = (origin_state or "").strip()
     place_of_supply = (place_of_supply or "").strip()
-    if not business_state:
+    if not origin_state:
         raise GSTCalculationError(
             "BUSINESS_PROFILE_INCOMPLETE",
             "Set your business state before creating invoices.",
@@ -221,10 +227,10 @@ def resolve_supply(*, business_state: str, place_of_supply: str) -> tuple[str, s
     if not place_of_supply:
         raise GSTCalculationError(
             "PLACE_OF_SUPPLY_MISSING",
-            "Select a place of supply for this invoice.",
+            "Select a place of supply for this document.",
             field="place_of_supply",
         )
-    if business_state == place_of_supply:
+    if origin_state == place_of_supply:
         label = "UTGST" if is_ut_without_legislature(place_of_supply) else "SGST"
         return SupplyType.INTRA, label
     return SupplyType.INTER, "IGST"
@@ -243,7 +249,7 @@ def state_tax_label(place_of_supply: str, supply_type: str) -> str:
 def calculate_invoice(
     lines,
     *,
-    business_state: str,
+    origin_state: str,
     place_of_supply: str,
     business_is_regular: bool = True,
     invoice_discount=ZERO,
@@ -252,7 +258,16 @@ def calculate_invoice(
     document_title: str = "",
 ) -> InvoiceTotals:
     """
-    Calculate an invoice from line inputs. Pure: no models, no database, no request.
+    Calculate a document's figures from line inputs.
+
+    Pure: no models, no database, no request.
+
+    `origin_state` is where the goods come FROM and `place_of_supply` where they
+    go TO; the two being equal is what makes a supply intra-state. For a sales
+    invoice both are the business's state. For a purchase (2.2) the origin is
+    the *supplier's* state and the place of supply is ours, which is exactly what
+    makes an input tax credit CGST+SGST or IGST. The parameter was named
+    `business_state` before 2.2, which implied the two always matched.
 
     Per line, in this exact order (a different order is the usual bug):
       1. gross   = q2(quantity * unit_price)
@@ -264,7 +279,7 @@ def calculate_invoice(
       6. total   = taxable + tax
     """
     supply_type, label = resolve_supply(
-        business_state=business_state, place_of_supply=place_of_supply
+        origin_state=origin_state, place_of_supply=place_of_supply
     )
 
     line_inputs = list(lines or [])

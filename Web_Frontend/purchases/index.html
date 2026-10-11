@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Purchases | Velocity</title>
+    <link rel="stylesheet" href="/shared/css/theme.css" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/shared/js/tailwind-config.js"></script>
+  </head>
+  <body class="min-h-screen bg-page">
+    <header id="nav" class="bg-navy"></header>
+
+    <main class="mx-auto max-w-7xl px-4 py-8">
+      <header class="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 class="text-2xl font-bold text-navy">Purchases</h1>
+          <p class="mt-1 text-sm text-muted">
+            Bills you receive from suppliers. Posting one adds the stock.
+          </p>
+        </div>
+        <button id="new-purchase-btn" class="btn btn-primary">+ New Purchase</button>
+      </header>
+
+      <!-- Bills whose typed figures disagree with the arithmetic. -->
+      <div id="divergence-banner"
+           class="mb-4 hidden rounded-xl border border-warning/30 bg-warning/5 p-4" role="status">
+        <h2 class="text-sm font-semibold text-navy">Some bills did not add up</h2>
+        <p class="mt-1 text-sm text-muted" id="divergence-text"></p>
+      </div>
+
+      <div class="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div class="rounded-xl border border-line bg-surface p-4">
+          <label for="f-search" class="label">Search</label>
+          <input id="f-search" type="search" class="input mt-1" placeholder="Bill number or supplier" />
+        </div>
+        <div class="rounded-xl border border-line bg-surface p-4">
+          <label for="f-status" class="label">Status</label>
+          <select id="f-status" class="input mt-1">
+            <option value="">All</option>
+            <option value="DRAFT">Draft</option>
+            <option value="POSTED">Posted</option>
+            <option value="CANCELLED">Cancelled</option>
+          </select>
+        </div>
+        <div class="rounded-xl border border-line bg-surface p-4">
+          <label for="f-from" class="label">From</label>
+          <input id="f-from" type="date" class="input mt-1" />
+        </div>
+        <div class="rounded-xl border border-line bg-surface p-4">
+          <label for="f-to" class="label">To</label>
+          <input id="f-to" type="date" class="input mt-1" />
+        </div>
+      </div>
+
+      <div class="card" id="table-card">
+        <div class="overflow-x-auto" id="table-wrap">
+          <table class="w-full">
+            <thead>
+              <tr class="border-b border-line bg-tint/40">
+                <th scope="col" class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted">Bill</th>
+                <th scope="col" class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted">Supplier</th>
+                <th scope="col" class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted">Date</th>
+                <th scope="col" class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted">Status</th>
+                <th scope="col" class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-muted">Tax</th>
+                <th scope="col" class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-muted">Total</th>
+              </tr>
+            </thead>
+            <tbody id="purchases-tbody"></tbody>
+          </table>
+        </div>
+
+        <div id="loading-state" class="p-10 text-center text-sm text-muted">Loading&hellip;</div>
+        <div id="empty-state" class="hidden p-10 text-center">
+          <p class="font-medium text-navy">No purchases yet</p>
+          <p class="mt-1 text-sm text-muted">Record the bills your suppliers send you.</p>
+          <button id="empty-action" class="btn btn-primary mt-4">Add the first purchase</button>
+        </div>
+        <div id="error-state" class="hidden p-10 text-center">
+          <p class="text-danger">Couldn't load purchases.</p>
+          <button id="retry-btn" class="btn btn-ghost mt-4">Try again</button>
+        </div>
+
+        <div id="pagination" class="flex flex-wrap items-center justify-between gap-3 border-t border-line p-3"></div>
+      </div>
+    </main>
+
+    <!-- Editor drawer -->
+    <div id="drawer" class="fixed inset-0 z-40 hidden" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+      <div class="fixed inset-0 bg-navy/30" data-close></div>
+      <div class="drawer-panel fixed inset-y-0 right-0 ml-auto flex h-full w-full max-w-6xl flex-col bg-surface shadow-xl transform transition-transform duration-200 ease-out" style="transform: translateX(100%);">
+        <header class="flex items-start justify-between gap-4 border-b border-line px-8 py-6 flex-shrink-0">
+          <div>
+            <h2 id="drawer-title" class="text-xl font-semibold text-navy">New Purchase</h2>
+            <p id="drawer-subtitle" class="mt-1 text-sm text-muted">
+              Amounts are entered exactly as printed on the supplier's bill.
+            </p>
+          </div>
+          <button type="button" data-close class="text-2xl leading-none text-muted hover:text-navy" aria-label="Close">&times;</button>
+        </header>
+
+        <form id="purchase-form" class="flex-1 space-y-8 overflow-y-auto px-8 py-7">
+          <section class="grid gap-x-8 gap-y-6 sm:grid-cols-2">
+            <div>
+              <label for="f-supplier" class="label">Supplier <span class="text-danger">*</span></label>
+              <select id="f-supplier" name="supplier" class="input" required>
+                <option value="">Choose a supplier&hellip;</option>
+              </select>
+              <p class="field-error" data-error-for="supplier"></p>
+            </div>
+            <div>
+              <label for="f-bill_number" class="label">Supplier Bill Number <span class="text-danger">*</span></label>
+              <input id="f-bill_number" name="bill_number" type="text" class="input" required
+                     placeholder="As printed on their bill" />
+              <p class="hint">Each bill from a supplier needs its own number.</p>
+              <p class="field-error" data-error-for="bill_number"></p>
+            </div>
+            <div>
+              <label for="f-bill_date" class="label">Bill Date <span class="text-danger">*</span></label>
+              <input id="f-bill_date" name="bill_date" type="date" class="input" required />
+              <p class="field-error" data-error-for="bill_date"></p>
+            </div>
+            <div>
+              <label for="f-due_date" class="label">Due Date <span class="text-danger">*</span></label>
+              <input id="f-due_date" name="due_date" type="date" class="input" required />
+              <p class="hint">When the payment falls due. Used for payables.</p>
+              <p class="field-error" data-error-for="due_date"></p>
+            </div>
+          </section>
+
+          <!-- Lines -->
+          <section>
+            <div class="mb-4 flex items-center justify-between">
+              <h3 class="text-xs font-semibold uppercase tracking-wider text-muted">Items</h3>
+              <button type="button" id="add-item-btn" class="btn btn-ghost !py-1.5 !px-4 text-xs">+ Add line</button>
+            </div>
+            <!--
+              The header must mirror exactly what renderLines() emits:
+              item, quantity, unit_price, then LINE_HEADERS in order
+              (taxable, cgst, sgst, igst, total), then the remove button.
+              It used to collapse the four tax columns into one "Tax" heading,
+              which shifted every figure one column to the left of its label.
+            -->
+            <div id="lines-wrap" class="hidden overflow-x-auto rounded-lg border border-line">
+              <table class="w-full min-w-[860px] text-sm">
+                <thead>
+                  <tr class="border-b border-line bg-tint/40 text-left text-xs uppercase tracking-wider text-muted">
+                    <th scope="col" class="px-4 py-3">Item</th>
+                    <th scope="col" class="px-3 py-3 text-right">Qty</th>
+                    <th scope="col" class="px-3 py-3 text-right">Rate</th>
+                    <th scope="col" class="px-3 py-3 text-right">Taxable</th>
+                    <th scope="col" class="px-3 py-3 text-right">CGST</th>
+                    <th scope="col" class="px-3 py-3 text-right">SGST</th>
+                    <th scope="col" class="px-3 py-3 text-right">IGST</th>
+                    <th scope="col" class="px-3 py-3 text-right">Total</th>
+                    <th scope="col" class="px-3 py-3"><span class="sr-only">Remove</span></th>
+                  </tr>
+                </thead>
+                <tbody id="lines-tbody"></tbody>
+              </table>
+            </div>
+            <p id="no-lines" class="rounded-lg border border-dashed border-line p-6 text-center text-sm text-muted">
+              Add at least one line.
+            </p>
+            <p class="field-error" data-error-for="items"></p>
+          </section>
+
+          <!-- Totals, entered -->
+          <section class="rounded-lg border border-line bg-tint/30 p-6">
+            <h3 class="mb-4 text-xs font-semibold uppercase tracking-wider text-muted">
+              Amounts as printed on the bill
+            </h3>
+            <p class="mb-4 text-sm text-muted">
+              Type what the bill says. These are never overwritten by the calculator &mdash;
+              use <strong>Check Figures</strong> to compare them.
+            </p>
+            <div class="grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <label for="f-subtotal" class="label">Subtotal</label>
+                <input id="f-subtotal" name="subtotal" type="text" inputmode="decimal"
+                       data-decimal class="input" placeholder="0.00" />
+              </div>
+              <div>
+                <label for="f-total_discount" class="label">Total Discount</label>
+                <input id="f-total_discount" name="total_discount" type="text" inputmode="decimal"
+                       data-decimal class="input" placeholder="0.00" />
+              </div>
+              <div>
+                <label for="f-taxable_total" class="label">Taxable Value</label>
+                <input id="f-taxable_total" name="taxable_total" type="text" inputmode="decimal"
+                       data-decimal class="input" placeholder="0.00" />
+              </div>
+              <div>
+                <label for="f-round_off" class="label">Round Off</label>
+                <input id="f-round_off" name="round_off" type="text" inputmode="decimal"
+                       data-decimal class="input" placeholder="0.00" />
+              </div>
+              <div>
+                <label for="f-cgst_total" class="label">CGST</label>
+                <input id="f-cgst_total" name="cgst_total" type="text" inputmode="decimal"
+                       data-decimal class="input" placeholder="0.00" />
+              </div>
+              <div>
+                <label for="f-sgst_total" class="label">SGST</label>
+                <input id="f-sgst_total" name="sgst_total" type="text" inputmode="decimal"
+                       data-decimal class="input" placeholder="0.00" />
+              </div>
+              <div>
+                <label for="f-igst_total" class="label">IGST</label>
+                <input id="f-igst_total" name="igst_total" type="text" inputmode="decimal"
+                       data-decimal class="input" placeholder="0.00" />
+              </div>
+              <div>
+                <label for="f-grand_total" class="label">Grand Total</label>
+                <input id="f-grand_total" name="grand_total" type="text" inputmode="decimal"
+                       data-decimal class="input" placeholder="0.00" />
+              </div>
+              <div class="sm:col-span-2 lg:col-span-3 flex items-end">
+                <label class="flex items-center gap-3 text-sm">
+                  <input type="checkbox" id="f-update_item_purchase_price"
+                         name="update_item_purchase_price"
+                         class="h-5 w-5 rounded border-line" />
+                  <span>
+                    Update each item's purchase price from this bill
+                    <span class="block text-xs text-muted">
+                      Overwrites the catalogue's buy price. Leave off to keep it unchanged.
+                    </span>
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            <!-- What the calculator thinks, versus what was typed. -->
+            <div id="preview-box" class="mt-4 hidden rounded-lg border border-line bg-surface p-3">
+              <p class="text-xs font-semibold uppercase tracking-wider text-muted">Calculator says</p>
+              <p class="mt-1 text-sm tabular-nums text-navy" id="preview-figures"></p>
+              <p class="mt-2 text-sm" id="preview-verdict"></p>
+            </div>
+          </section>
+
+          <section class="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label for="f-notes" class="label">Notes</label>
+              <textarea id="f-notes" name="notes" rows="2" class="input"></textarea>
+            </div>
+          </section>
+        </form>
+
+        <footer class="flex flex-wrap items-center justify-end gap-3 border-t border-line bg-tint/50 px-8 py-5 flex-shrink-0">
+          <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+          <button type="button" id="preview-btn" class="btn btn-secondary">Check Figures</button>
+          <button type="submit" form="purchase-form" id="submit-btn" class="btn btn-primary">Save Draft</button>
+          <button type="button" id="post-btn" class="btn btn-primary hidden">Post &amp; Add Stock</button>
+        </footer>
+      </div>
+    </div>
+
+    <!-- Cancel dialog -->
+    <div id="cancel-dialog" class="fixed inset-0 z-50 hidden" role="alertdialog" aria-modal="true">
+      <div class="fixed inset-0 bg-navy/30" id="cancel-backdrop"></div>
+      <div class="fixed inset-0 flex items-center justify-center p-4">
+        <div class="w-full max-w-md rounded-xl bg-surface p-6 shadow-xl">
+          <h3 id="cancel-title" class="text-lg font-semibold text-navy">Cancel this bill?</h3>
+          <p class="mt-2 text-sm text-muted">
+            Cancelling takes the stock back off. If the goods were already sold, stock
+            can go below zero &mdash; which your stock policy decides.
+          </p>
+          <div class="mt-4">
+            <label for="cancel-reason" class="label">Reason <span class="text-danger">*</span></label>
+            <input id="cancel-reason" type="text" class="input" placeholder="e.g. supplier returned the goods" />
+            <p class="field-error" data-error-for="reason"></p>
+          </div>
+          <div id="cancel-details" class="mt-3 hidden rounded-lg bg-danger/5 p-3 text-sm text-danger"></div>
+          <div class="mt-5 flex justify-end gap-3">
+            <button type="button" id="cancel-cancel" class="btn btn-ghost">Keep it</button>
+            <button type="button" id="cancel-confirm" class="btn btn-danger">Cancel Bill</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="/shared/js/config.js"></script>
+    <script src="/shared/js/api.js"></script>
+    <script src="/shared/js/ui.js"></script>
+    <script src="/purchases/purchases.js"></script>
+  </body>
+</html>

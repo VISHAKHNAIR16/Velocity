@@ -75,11 +75,11 @@ class Command(BaseCommand):
         alias = options["database"] or router.db_for_write(get_user_model())
         connection = connections[alias]
 
-        model_labels = (
-            set(options["apps"])
-            if options["apps"]
-            else {m._meta.label for m in apps.get_models()}
-        )
+        # App labels, on both sides of the comparison. Building the default from
+        # `_meta.label` ("purchases.Purchase") while comparing against
+        # `app_label` ("purchases") silently skipped every model - which is how a
+        # safety check ends up reporting "all clear" having checked nothing at all.
+        model_labels = set(options["apps"]) if options["apps"] else None
 
         with connection.cursor() as cursor:
             tables = set(connection.introspection.table_names(cursor))
@@ -92,7 +92,12 @@ class Command(BaseCommand):
             violations = 0
 
             for model in apps.get_models():
-                if model._meta.label not in model_labels:
+                # Matched on `app_label`, not the full label ("purchases.Purchase").
+                # Comparing against `_meta.label` made `--app purchases` silently
+                # check nothing - a command that quietly reports "all clear"
+                # because its filter never matched is the exact failure mode this
+                # command exists to prevent.
+                if model_labels is not None and model._meta.app_label not in model_labels:
                     continue
                 if not model._meta.managed:
                     continue

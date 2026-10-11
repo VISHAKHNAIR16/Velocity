@@ -127,7 +127,7 @@ class Command(BaseCommand):
         try:
             expected = calculate_invoice(
                 build_line_inputs(lines),
-                business_state=invoice.business_state_code,
+                origin_state=invoice.business_state_code,
                 place_of_supply=invoice.place_of_supply,
                 business_is_regular=(
                     invoice.business.gst_registration_type

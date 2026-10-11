@@ -117,7 +117,7 @@ def compute_totals(
 
     return calculate_invoice(
         build_line_inputs(lines),
-        business_state=business.state_code,
+        origin_state=business.state_code,
         place_of_supply=resolved_pos,
         business_is_regular=(business.gst_registration_type == business.GstRegistrationType.REGULAR),
         invoice_discount=invoice_discount,

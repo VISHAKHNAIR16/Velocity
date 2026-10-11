@@ -171,6 +171,7 @@ function renderNav(active) {
         ${link("/parties/index.html", "Parties", "parties")}
         ${link("/items/index.html", "Items", "items")}
         ${link("/invoices/index.html", "Invoices", "invoices")}
+        ${link("/purchases/index.html", "Purchases", "purchases")}
         ${link("/business/profile.html", "Business", "profile")}
         <button id="logout-btn" class="px-3 py-2 rounded-lg text-sm font-medium text-white/80 hover:text-white hover:bg-white/5 transition-colors" aria-label="Log out">Log out</button>
       </nav>

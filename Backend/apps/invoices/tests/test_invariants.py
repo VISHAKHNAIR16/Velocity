@@ -69,7 +69,7 @@ def build_random_invoice(rng, *, max_lines=6, inclusive=False, round_off=False):
     pos = business if rng.random() < 0.5 else rng.choice(["36", "27", "29", "33"])
 
     return lines, dict(
-        business_state=business,
+        origin_state=business,
         place_of_supply=pos,
         business_is_regular=rng.random() < 0.85,
         invoice_discount=invoice_discount,

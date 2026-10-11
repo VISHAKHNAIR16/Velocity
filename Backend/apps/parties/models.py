@@ -30,6 +30,31 @@ class Party(TenantModel):
         CREDIT = "CREDIT", "Credit (Party owes us)"
         DEBIT = "DEBIT", "Debit (We owe party)"
 
+    class GstRegistrationType(models.TextChoices):
+        """
+        How the party is registered for GST (added in 2.2, for purchases).
+
+        A supplier's registration decides whether their bill carries tax at all
+        and whether that tax is claimable as input credit. Sales never needed
+        this: `is_registered` below was enough, because a sale either has a
+        GSTIN or it does not.
+        """
+
+        REGULAR = "REGULAR", "Regular"
+        COMPOSITION = "COMPOSITION", "Composition"
+        UNREGISTERED = "UNREGISTERED", "Unregistered"
+
+    #: Backfilled to REGULAR wherever a GSTIN exists, so the new field never
+    #: contradicts `is_registered` on existing data.
+    gst_registration_type = models.CharField(
+        max_length=15,
+        choices=GstRegistrationType.choices,
+        default=GstRegistrationType.UNREGISTERED,
+        help_text="Only 'Regular' suppliers charge GST on their bills and give "
+        "input tax credit. Composition and unregistered suppliers bill with no "
+        "tax and earn no credit.",
+    )
+
     # --- Identity ---
     name = models.CharField(max_length=200)
     party_type = models.CharField(
