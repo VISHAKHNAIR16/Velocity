@@ -1179,16 +1179,81 @@ These are locked now because each one prevents a known mistake.
 >
 > **Not done:** real-browser sign-off. `docs/QA_CHECKLIST.md` section 6 is written and unticked.
 
-### 2.3 PDF Generation Engine & Document Sharing — decision level
+### 2.3 PDF Generation Engine & Template Selection — **planned, not started**
 
-- [ ] **Deployment spike first, before any template work.** WeasyPrint needs system libraries (Pango/Cairo) that Render's native Python runtime does not provide — it needs a Docker deploy. ReportLab and xhtml2pdf are pure Python. Deploy a one-page PDF to your actual Render service and pick the engine from the result; also measure peak memory against the 512 MB free-tier limit.
-- [ ] **Fonts:** Helvetica has no `₹` glyph (you get a box). Bundle a TTF with U+20B9 (e.g. Noto Sans) and a Devanagari font; test a party name in Hindi.
-- [ ] **Render from stored snapshots only.** Never recompute tax, never read the live business, party or item. A reprint must show identical numbers forever.
-- [ ] **Do not store PDFs.** Generate on demand from the snapshots. This removes `pdf_file_url`, the Cloudinary privacy exposure, drift and cleanup. (Replaces the 2.3.2 "save to Cloudinary" step.)
-- [ ] **Sharing = signed, expiring link:** `django.core.signing` token (default 7 days), a public throttled endpoint that returns a uniform 404 for any bad token, and `Invoice.share_version` so "revoke links" is one increment. WhatsApp button uses the party mobile; **a walk-in has none** — ask.
-- [ ] **Layouts:** A4 Tax Invoice and Bill of Supply first; an **80 mm thermal receipt** for retail/walk-in as a follow-up. ⚖️ Optional "Original for recipient / Duplicate for supplier" labels (Rule 46).
-- [ ] **Content:** reverse-charge constant line, `state_tax_label` (SGST/UTGST), amount in words, place of supply name + code, optional bank details / UPI QR / signature image. **No item photos** (bigger files, slower, and a replaced image would rewrite history).
-- [ ] **Robustness tests:** HTML escaping (`<script>`, `&` in names), very long item names, a **150-line invoice** (header repeats, totals never split across pages), Hindi text, peak memory, a generation timeout.
+**Resolved decisions (2026-10-12).**
+
+| # | Question | Decision | Why |
+|---|---|---|---|
+| 25 | **PDF engine** | **WeasyPrint**, deployed through a **`Dockerfile`** | Best typography and real CSS, so a template is HTML + CSS rather than Python drawing code. WeasyPrint needs Pango ≥ 1.44 as a *system* library, which Render's native Python runtime does not provide. |
+| 26 | **Where did that leave WeasyPrint already working?** | The `VCRM` reference deploys to **Railway**, not Render | `VCRM/Procfile` and `railway.json` are Railway; its Nixpacks base image ships Pango, which is why WeasyPrint worked there with no Dockerfile. **That evidence does not transfer to Render.** Worth knowing before anyone "recalls" it working on Render. |
+| 27 | **The two templates** | **Classic** (bordered table, header band, formal — B2B / GST filing) and **Modern** (hairline rules, generous whitespace, sans-serif — retail) | Genuinely different designs, not one layout with a heading swapped. Shared partials mean the two can differ in *styling* but never in *figures*. |
+| 28 | **Where the choice lives** | **Per download** — a picker at print time | Nothing stored, no migration, and a reprint is always rendered fresh. Template choice is presentation, not data. |
+| 29 | **Bank details + logo** | **Snapshotted onto the invoice** | The rule below says a reprint must show identical numbers forever. Reading them live means changing the bank account silently rewrites every historical invoice. |
+| 30 | **Signature / stamp** | **Optional.** Uploaded on the business profile, snapshotted as a URL onto the invoice. **If absent the PDF still renders** and the signature area is simply left blank. | A business that never uploads one must still be able to invoice. Blank beats broken. |
+| 31 | **UPI / QR** | **Out of scope for 2.3** | Independent of the template work; no field added. |
+| 32 | **Which documents** | **Issued invoices only.** Drafts are refused; purchases are excluded | The main copy for the customer. A draft estimate is a different document with different rules. |
+| 33 | **Caching** | **Yes — cache the rendered PDF**, keyed by invoice + template + a snapshot version | An issued invoice is immutable, so a cached PDF cannot go stale. Saves a WeasyPrint render (slow, memory-hungry) on every repeat download. |
+
+#### 2.3.0 Step 0 — Docker first, alone
+
+- [ ] **Write `Dockerfile` + `.dockerignore` and push to Render before any PDF code exists.** The container build is the only test available for the platform decision, and Render's build log is the pass/fail. Nothing downstream is written until the image builds.
+- [ ] **`.dockerignore` before `Dockerfile`, always.** Without it `.env`, `.git/`, `Backend/.venv/` and `Web_Frontend/node_modules/` all enter the build context. This is a security control, not a speed tweak.
+- [ ] **Base image `python:3.12-slim-bookworm`.** Matches `requires-python = ">=3.12"`; **Debian 12 = bookworm**, the same family as Render's own runtime, so apt package names cannot drift. Pin major.minor only — pinning a patch that later disappears breaks the build for everyone.
+- [ ] **Exact Pango set:** `libpango-1.0-0`, `libpangoft2-1.0-0`, `libpangocairo-1.0-0`, `libharfbuzz0b`, `libharfbuzz-subset0`, `libcairo2`, `libgdk-pixbuf-2.0-0`, `shared-mime-info`. ⚠️ **`libharfbuzz0b` and `libharfbuzz-subset0` are two separate packages on bookworm.** Most tutorials list them as one and the image fails on the missing half.
+- [ ] **Single stage.** A multi-stage build saves ~200 MB but adds failure modes on something nobody can test locally. Not a trade worth making.
+- [ ] **Install from `requirements.txt`, not `uv sync`.** It is already a pinned, committed lockfile; a second package manager inside the image is one more thing that can be wrong.
+- [ ] **`collectstatic` at build with a dummy `SECRET_KEY`.** `settings.py:50` raises without one, and `CompressedManifestStaticFilesStorage` needs settings while collecting. The dummy is build-only, never runtime, never committed.
+- [ ] **Non-root `app` user.** Prevents root-owned files if the container ever needs a shell.
+- [ ] **`gunicorn --bind 0.0.0.0:${PORT:-8000}`, `--workers 1 --threads 4`, `--timeout 90`.** WeasyPrint is memory-hungry and the free tier is 512 MB. One worker is the safe default; threads keep it responsive.
+- [ ] **`HEALTHCHECK` via `python -c` + `urllib` against `/api/v1/health/`.** `curl` is absent from `slim`, and that endpoint is an unauthenticated plain function view.
+- [ ] **No `migrate` on container start.** Migrations race when more than one replica boots. Documented pre-deploy step, not start-up.
+- [ ] ⚠️ **Verify `CLOUDINARY_URL` is set in production.** Without it `STORAGES["default"]` stays on local disk (`settings.py:198`) and **uploaded logos die on every redeploy** — and 2.3 puts a logo on every invoice.
+
+#### 2.3.1 Snapshot migration
+
+- [ ] Add to `Invoice`: `bank_account_name`, `bank_account_number`, `bank_ifsc`, `bank_name`, `bank_branch` (all `CharField(blank=True)`) and **`business_logo_url`** + **`business_signature_url`** (`CharField`).
+- [ ] **Snapshot the logo and signature as URLs, never as `ImageField`.** A PDF needs a URL; copying binaries would duplicate files and complicate storage.
+- [ ] **Signature is optional.** No upload → the PDF renders anyway with the signature area left blank.
+- [ ] **Write site:** `issue.py:316-320`, beside the existing `business_name` / `business_gstin` snapshot.
+- [ ] **Data migration backfills `ISSUED` invoices** from the business profile so old invoices are not blank. ⚠️ Honest caveat: this stamps *today's* bank details onto past documents. Wrong history, but far better than an empty box, and there is no time machine.
+
+#### 2.3.2 Renderer & context
+
+- [ ] **`render_invoice_pdf(invoice, template)` behind a one-method interface,** so falling back to another engine is ~20 lines and not a rewrite.
+- [ ] **Lazy-import WeasyPrint *inside* the function.** A module-level import breaks every local test run on Windows, which has no GTK runtime.
+- [ ] **`build_invoice_context(invoice)` is the single source of truth.** Never reads live `Party`, `Item` or `BusinessProfile`. This is what makes "identical forever" true rather than aspirational.
+- [ ] Reuse what already exists: `amount_in_words()` (`core/money.py:199`), `state_tax_label()` (`gst_calculator.py:239`), `state_name()` (`core/constants.py:161`).
+
+#### 2.3.3 Templates
+
+- [ ] `invoice_classic.html` + `.css`, `invoice_modern.html` + `.css`, plus shared `_header` / `_lines` / `_totals` partials. `APP_DIRS: True` is already set and `DIRS` is `[]`, so **no settings change is needed**.
+- [ ] **Fonts:** Helvetica has no `₹` glyph — it renders as a box on the most prominent number on the page. Bundle a TTF with U+20B9 and declare `@font-face`.
+- [ ] Content: reverse-charge constant line, `state_tax_label` (SGST/UTGST/IGST), amount in words, place of supply name + code, bank block, logo, signature area, and **no item photos** (bigger files, slower, and a replaced image would rewrite history).
+
+#### 2.3.4 API
+
+- [ ] `GET /api/v1/invoices/{id}/pdf/?template=classic|modern` → `application/pdf`, `Content-Disposition: attachment`, tenant-scoped.
+- [ ] **`DRAFT` and `CANCELLED` are refused** (400). Issued invoices only.
+- [ ] **Unknown template → 400, never a 500.**
+- [ ] **Cache the rendered bytes,** keyed by invoice id + template + a snapshot version so an edited invoice can never serve a stale PDF.
+
+#### 2.3.5 Deferred to 2.3.6
+
+- [ ] Sharing = signed, expiring link: `django.core.signing` token (7 days), a public throttled endpoint returning a uniform 404 for any bad token, and `Invoice.share_version` so "revoke links" is one increment. **Not in 2.3.**
+
+#### 2.3.6 Robustness tests
+
+- [ ] **Both templates emit identical figures** — the invariant that actually matters.
+- [ ] **Snapshot-only:** rename the live party → regenerate → PDF unchanged.
+- [ ] HTML escaping (`<script>`, `&` in names); very long item names.
+- [ ] **150-line invoice:** header repeats, totals never split across a page break.
+- [ ] Hindi text; cross-tenant → 404; draft/cancelled refused; unknown template → 400.
+- [ ] ✅ **`₹` renders, not a box.**
+- [ ] **All render tests guarded by `skipUnless`** (the same pattern as `backend_supports_row_locks()`), so the suite degrades instead of erroring wherever Pango is absent.
+- [ ] ✅ **Measured, not assumed:** WeasyPrint **68.1 both imports and renders on the current dev machine** (`%PDF-1.7`, 6,063 bytes for a probe) - a GTK runtime is present on this Windows box. The guard is still kept, because it is what makes the suite portable to a machine without that runtime, and because CI (`ubuntu-latest`) ships Pango and will run them for real. **Correction worth recording: this plan originally claimed local PDF testing was impossible. It is not - it is merely not guaranteed on an arbitrary machine.**
+
+---
 
 ### 2.4 Credit Notes, Debit Notes & Sales Returns — decision level (**launch gate for any B2B customer**)
 

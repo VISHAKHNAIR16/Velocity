@@ -4,14 +4,24 @@ asgiref==3.12.1
     # via
     #   django
     #   django-cors-headers
+brotli==1.2.0 ; platform_python_implementation == 'CPython'
+    # via fonttools
+brotlicffi==1.2.0.2 ; platform_python_implementation != 'CPython'
+    # via fonttools
 certifi==2026.7.22
     # via
     #   cloudinary
     #   requests
+cffi==2.1.1
+    # via
+    #   brotlicffi
+    #   weasyprint
 charset-normalizer==3.5.2
     # via requests
 cloudinary==1.46.3
     # via django-cloudinary-storage
+cssselect2==0.10.1
+    # via weasyprint
 dj-database-url==3.1.2
     # via velocity
 django==5.2.17
@@ -31,18 +41,28 @@ djangorestframework==3.18.1
     #   velocity
 djangorestframework-simplejwt==5.5.1
     # via velocity
+fonttools==4.66.1
+    # via weasyprint
 gunicorn==26.2.0
     # via velocity
 idna==3.20
     # via requests
 pillow==12.3.0
-    # via velocity
+    # via
+    #   velocity
+    #   weasyprint
 psycopg==3.3.6
     # via velocity
 psycopg-binary==3.3.6 ; implementation_name != 'pypy'
     # via psycopg
+pycparser==3.11 ; implementation_name != 'PyPy'
+    # via cffi
+pydyf==0.12.1
+    # via weasyprint
 pyjwt==2.15.1
     # via djangorestframework-simplejwt
+pyphen==0.18.1
+    # via weasyprint
 python-dotenv==1.2.4
     # via velocity
 requests==2.34.2
@@ -51,6 +71,12 @@ six==1.17.0
     # via cloudinary
 sqlparse==0.6.0
     # via django
+tinycss2==1.5.1
+    # via
+    #   cssselect2
+    #   weasyprint
+tinyhtml5==2.1.0
+    # via weasyprint
 typing-extensions==4.16.0 ; python_full_version < '3.13'
     # via psycopg
 tzdata==2026.5 ; sys_platform == 'win32'
@@ -61,5 +87,14 @@ urllib3==2.8.0
     # via
     #   cloudinary
     #   requests
+weasyprint==68.1
+    # via velocity
+webencodings==0.6.1
+    # via
+    #   cssselect2
+    #   tinycss2
+    #   tinyhtml5
 whitenoise==6.12.0
     # via velocity
+zopfli==0.4.3
+    # via fonttools

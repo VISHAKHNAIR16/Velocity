@@ -420,3 +420,32 @@ things that will bite later if they are not recorded.
       bill carries bank details and GSTINs.
 - [ ] **The purchase page has no browser sign-off.** `docs/QA_CHECKLIST.md` section 6 is written and
       unticked, for the same reason as 2.0.9 and 2.1.5 — no browser runner in this environment.
+
+---
+
+## 8. Phase 2.3 (PDF templates) — follow-ups
+
+- [ ] ⚠️ **The `VCRM` reference does not transfer, and it is worth remembering why.** It deploys to
+      **Railway** (`Procfile`, `railway.json`), whose Nixpacks base image ships Pango. WeasyPrint works
+      there with no Dockerfile *because the platform image supplies the library invisibly*. Render's
+      native Python runtime does not, which is why 2.3 needs a Dockerfile at all. Anyone who "remembers"
+      WeasyPrint working on Render is remembering Railway.
+- [ ] ⚠️ **A `CLOUDINARY_URL`-less deployment silently loses every logo and signature.** Media falls
+      back to local disk (`settings.py:198`), which is ephemeral inside a container. The 2.3 PDF puts
+      both on every invoice, so this becomes visible the moment it bites.
+- [ ] **WeasyPrint is lazily imported and its render tests are `skipUnless`-guarded.** The guard was
+      written on the assumption that the dev machine could not run Pango, and that assumption was wrong
+      — a GTK runtime happens to be installed here, so PDFs render locally too. The guard is kept
+      anyway: it is cheap, it matches `backend_supports_row_locks()`, and it is the only thing standing
+      between this suite and a hard failure on a colleague's fresh Windows clone. **Measure before
+      claiming a machine cannot do something.**
+- [ ] **Both templates share partials on purpose.** They must be free to differ in styling and
+      incapable of differing in figures. A test asserting the two print identical numbers is what keeps
+      that true when someone edits one and forgets the other.
+- [ ] **The backfill stamps today's bank details onto historical invoices.** Wrong history, chosen
+      deliberately over blank boxes. If a business's bank details were wrong on an old invoice, that
+      invoice now shows the corrected account, and no amount of auditing would have caught it.
+- [ ] **Template choice is per download and stored nowhere.** The trade-off is deliberate: a reprint
+      can look different from the copy the customer received. If that ever matters (a disputed invoice),
+      it becomes a snapshotted field plus a migration — noted here so the omission is a decision
+      rather than an oversight.

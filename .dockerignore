@@ -1,0 +1,64 @@
+# Build context for the backend image.
+#
+# This is a SECURITY control, not just a speed tweak. Without it, every byte of
+# the working tree is uploaded to the Docker daemon before the build starts -
+# which includes Backend/.env (SECRET_KEY, DATABASE_URL, CLOUDINARY_URL),
+# .git/ (the full history), Backend/.venv/ and Web_Frontend/node_modules/.
+#
+# Keep this in sync with .gitignore, but note the two differ on purpose: this
+# file describes what the IMAGE needs, .gitignore describes what the repo needs.
+
+# --- Secrets. Must never reach a layer, not even a deleted one. ---
+**/.env
+**/.env.*
+!.env.example
+Backend/.env*
+Backend/.env.example
+session-ses_eea3.md
+Web_Frontend/node_modules/
+TECH.md
+dev.ps1
+gst_billing_app_specification.md
+# --- VCS and CI ---
+.git
+.gitignore
+.github
+.claude
+
+# --- Python local env + caches ---
+Backend/.venv
+**/__pycache__
+**/*.py[cod]
+**/*.pyo
+**/.pytest_cache
+**/.ruff_cache
+**/*.egg-info
+**/.mypy_cache
+
+# --- Local databases: never bake a developer's data into an image ---
+**/*.sqlite3
+**/*.sqlite3-journal
+**/db.sqlite3
+
+# --- Collectstatic output and uploads are runtime concerns ---
+# STATIC_ROOT is produced by `collectstatic` inside the image. Shipping the
+# host's copy would bake in absolute paths from a different machine.
+Backend/staticfiles
+Backend/media
+
+# --- Frontend is served separately (Cloudflare Pages), not by Django ---
+Web_Frontend
+
+# --- Docs and scratch: not needed to serve the API ---
+Docs
+docs
+*.md
+session-ses_eea3.md
+dev.ps1
+
+# --- Editors / OS ---
+.vscode
+.idea
+Thumbs.db
+.DS_Store
+*.log
