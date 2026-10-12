@@ -20,12 +20,13 @@ from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 
-from .views import db_health_check, health_check
+from .views import db_health_check, diagnostics_check, health_check
 
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/v1/health/", health_check, name="health-check"),
     path("api/v1/health/db/", db_health_check, name="db-health-check"),
+  path("api/v1/health/diagnostics/", diagnostics_check, name="health-diagnostics"),
     path("api/v1/", include("apps.accounts.urls")),
     path("api/v1/", include("apps.parties.urls")),
     path("api/v1/", include("apps.inventory.urls")),

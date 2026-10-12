@@ -164,8 +164,15 @@ if os.getenv("DATABASE_URL", "").startswith("postgres"):
 # The cache table is created by a migration in `apps.core`, so a fresh database
 # has it without any manual step.
 CACHES = {
+    # `ResilientDatabaseCache` is `DatabaseCache` with one difference: if the
+    # `django_cache` table is missing or unreachable, it degrades to an
+    # in-process cache instead of raising. That matters more than it looks,
+    # because DRF throttles read the cache BEFORE the view body runs - so an
+    # unusable cache used to turn every throttled endpoint into a bare 500,
+    # which is precisely how a total login outage happened. See
+    # config/cache.py and FUTURE_CHECKLIST.md.
     "default": {
-        "BACKEND": "django.core.cache.backends.db.DatabaseCache",
+        "BACKEND": "config.cache.ResilientDatabaseCache",
         "LOCATION": "django_cache",
         # Never let the cache itself become an outage: if the table is missing
         # the app must still boot, and throttling degrades rather than 500s.
@@ -303,3 +310,12 @@ if not DEBUG:
     SECURE_HSTS_SECONDS = 3600  # start small; raise to 1 year once everything is verified
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_CONTENT_TYPE_NOSNIFF = True
+
+
+# --- Diagnostics -------------------------------------------------------------
+# Set this in the host's environment to unlock the `?token=` half of
+# /api/v1/health/diagnostics/, which reports the live exception from the login
+# path. Without it that half stays off, and the endpoint returns only booleans.
+# It is read with getattr() rather than os.getenv so an unset value cannot break
+# start-up.
+DIAGNOSTICS_TOKEN = os.getenv("DIAGNOSTICS_TOKEN", "")
