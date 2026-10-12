@@ -1,0 +1,45 @@
+{% comment %}
+Shared by BOTH templates. The whole point of factoring these out is that the
+Classic and Modern layouts may differ in styling and must never differ in
+figures. A test asserts they print the same numbers; keeping the figures in
+partials is what makes that test passable rather than accidental.
+{% endcomment %}
+<table class="lines">
+  <thead>
+    <tr>
+      <th class="num">#</th>
+      <th>Item</th>
+      <th>HSN/SAC</th>
+      <th class="num">Qty</th>
+      <th class="num">Rate</th>
+      <th class="num">Taxable</th>
+      <th class="num">{{ supply.tax_label }}</th>
+      <th class="num">Total</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for line in lines %}
+      <tr>
+        <td class="num muted">{{ forloop.counter }}</td>
+        <td>
+          <div class="item-name">{{ line.name }}</div>
+          {% if line.is_service %}<div class="muted small">Service</div>{% endif %}
+        </td>
+        <td class="muted">{{ line.hsn|default:"—" }}</td>
+        {# Quantity is printed with its own precision rather than intcomma'd:
+            a decimal like 2.500 must not be rounded into an integer by a
+            thousands separator formatter. #}
+        <td class="num">{{ line.quantity|floatformat:3 }} {{ line.unit }}</td>
+        <td class="num">{{ line.unit_price|floatformat:2 }}</td>
+        <td class="num">{{ line.taxable_value|floatformat:2 }}</td>
+        <td class="num">
+          {% if supply.tax_label == "IGST" %}{{ line.igst|floatformat:2 }}
+          {% else %}{{ line.sgst|floatformat:2 }}{% endif %}
+        </td>
+        <td class="num strong">{{ line.total|floatformat:2 }}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="8" class="muted center">This invoice has no lines.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>

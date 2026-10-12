@@ -23,6 +23,7 @@
   const ICON_ISSUE = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>';
   const ICON_COPY = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16V8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H10a2 2 0 01-2-2z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8V6a2 2 0 00-2-2H6a2 2 0 00-2 2v8a2 2 0 002 2h2"/></svg>';
   const ICON_X = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>';
+  const ICON_PDF = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3M7 3h7l5 5v11a2 2 0 01-2 2H7a2 2 0 01-2-2V5a2 2 0 012-2z"/></svg>';
 
   const state = {
     page: 1,
@@ -141,7 +142,18 @@
   // ===================================================================
   // ROWS
   // ===================================================================
-  function iconButton(iconHtml, label, onClick, extraClass = "") {
+  /**
+ * Row action for the PDF.
+ *
+ * Sends the user to the billing page rather than downloading straight from the
+ * list, because the template is a choice: downloading blind would make the
+ * second layout unreachable except by editing the URL. The picker is there.
+ */
+function openPdfPicker(invoice) {
+  window.location.href = `/invoices/billing.html?id=${invoice.id}`;
+}
+
+function iconButton(iconHtml, label, onClick, extraClass = "") {
     const button = h("button", {
       type: "button",
       className: `icon-btn ${extraClass}`.trim(),
@@ -199,9 +211,10 @@
     if (invoice.status === "DRAFT") {
       actions.append(iconButton(ICON_ISSUE, "Issue invoice", () => issueInvoice(invoice.id)));
       actions.append(iconButton(ICON_COPY, "Copy as new draft", () => copyInvoice(invoice.id)));
-    } else if (invoice.status === "ISSUED") {
-      actions.append(iconButton(ICON_X, "Cancel invoice", () => openCancelDialog(invoice), "danger"));
-    }
+} else if (invoice.status === "ISSUED") {
+        actions.append(iconButton(ICON_PDF, "Download PDF", () => openPdfPicker(invoice)));
+        actions.append(iconButton(ICON_X, "Cancel invoice", () => openCancelDialog(invoice), "danger"));
+      }
     row.append(h("td", {}, actions));
 
     row.addEventListener("click", open);

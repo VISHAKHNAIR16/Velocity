@@ -73,6 +73,7 @@ class BusinessProfileSerializer(serializers.ModelSerializer):
             "state_code",
             "pincode",
             "logo",
+            "signature",
             "bank_account_name",
             "bank_account_number",
             "bank_ifsc",
@@ -88,7 +89,7 @@ class BusinessProfileSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "logo", "created_at", "updated_at"]
+        read_only_fields = ["id", "logo", "signature", "created_at", "updated_at"]
 
     def get_is_complete(self, obj: BusinessProfile) -> bool:
         return bool(obj.state_code and obj.address_line and obj.city and obj.pincode)
@@ -132,6 +133,28 @@ class BusinessProfileSerializer(serializers.ModelSerializer):
         if errors:
             raise serializers.ValidationError(errors)
         return attrs
+
+
+class SignatureUploadSerializer(serializers.Serializer):
+    """Validates an uploaded signature/stamp. Same rules as the logo.
+
+    Optional by design: never uploading one is a normal state, and the PDF
+    leaves the signature area empty rather than failing.
+    """
+
+    MAX_BYTES = 2 * 1024 * 1024  # 2 MB
+    ALLOWED_FORMATS = {"JPEG", "PNG", "WEBP"}
+
+    signature = serializers.ImageField()
+
+    def validate_signature(self, file):
+        if file.size > self.MAX_BYTES:
+            raise serializers.ValidationError("Signature must be 2 MB or smaller.")
+        # Pillow reports the real format, whatever the filename or browser claims.
+        image_format = getattr(getattr(file, "image", None), "format", None)
+        if image_format not in self.ALLOWED_FORMATS:
+            raise serializers.ValidationError("Signature must be a PNG, JPG or WebP image.")
+        return file
 
 
 class LogoUploadSerializer(serializers.Serializer):

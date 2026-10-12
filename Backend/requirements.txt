@@ -87,7 +87,7 @@ urllib3==2.8.0
     # via
     #   cloudinary
     #   requests
-weasyprint==68.1
+weasyprint==70.0
     # via velocity
 webencodings==0.6.1
     # via

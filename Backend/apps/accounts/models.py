@@ -245,6 +245,12 @@ class BusinessProfile(models.Model):
     # --- Logo (upload API and Cloudinary come in a later step) ---
     logo = models.ImageField(upload_to=logo_upload_path, blank=True)
 
+    # --- Signature / stamp (2.3) ---
+    # Optional. A business that never uploads one still issues invoices; the
+    # PDF simply leaves the signature area empty. Shared storage path helper
+    # with the logo so the two behave identically, including on Cloudinary.
+    signature = models.ImageField(upload_to=logo_upload_path, blank=True)
+
     # --- Bank details (printed on invoices) ---
     bank_account_name = models.CharField(max_length=150, blank=True)
     bank_account_number = models.CharField(

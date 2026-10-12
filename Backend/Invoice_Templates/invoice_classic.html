@@ -1,0 +1,124 @@
+{% comment %}
+CLASSIC layout - bordered table, header band. Formal, for B2B and filing.
+
+The figures live entirely in the shared partials, so this file only decides how
+they look. WeasyPrint repeats <thead> on every page automatically, which is what
+keeps a 150-line invoice readable.
+{% endcomment %}<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{{ meta.title }} {{ meta.number }}</title>
+  <style>
+    /* DejaVu Sans is listed first deliberately. Helvetica - WeasyPrint's
+       default - has no U+20B9 rupee glyph and renders the grand total as a
+       box. DejaVu ships with the Docker image and carries the sign. */
+    @page {
+      size: A4;
+      margin: 14mm 12mm 18mm 12mm;
+      @bottom-right {
+        content: "Page " counter(page) " of " counter(pages);
+        font-size: 7.5pt;
+        color: #64748b;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "DejaVu Sans", "Noto Sans", "Liberation Sans", sans-serif;
+      font-size: 8.5pt;
+      color: #0f172a;
+      margin: 0;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    .num { text-align: right; }
+    .center { text-align: center; }
+    .muted { color: #64748b; }
+    .small { font-size: 7.5pt; }
+    .strong { font-weight: 700; }
+
+    .doc-header {
+      display: flex; justify-content: space-between; align-items: flex-start;
+      border-bottom: 2px solid #0f172a; padding-bottom: 8px; margin-bottom: 10px;
+    }
+    .supplier-block { display: flex; gap: 10px; align-items: flex-start; }
+    .logo { width: 58px; height: 58px; object-fit: contain; }
+    .supplier-name { font-size: 12pt; font-weight: 700; }
+    .supplier-text { line-height: 1.35; }
+    .title-block { text-align: right; }
+    .doc-title { font-size: 13pt; font-weight: 700; letter-spacing: 0.04em; }
+    .doc-number { font-size: 10pt; font-weight: 700; margin: 1px 0 5px; }
+    .meta-table { width: auto; margin-left: auto; }
+    .meta-table td { padding: 0 0 1px 12px; font-size: 7.5pt; }
+    .meta-table td:first-child { color: #64748b; text-align: left; }
+
+    .parties { display: flex; gap: 14px; margin-bottom: 10px; }
+    .party {
+      flex: 1; border: 1px solid #cbd5e1; padding: 6px 8px; line-height: 1.35;
+    }
+    .party .label {
+      font-size: 7pt; text-transform: uppercase; letter-spacing: 0.06em;
+      color: #64748b; margin-bottom: 2px;
+    }
+
+    .lines { margin-top: 4px; }
+    .lines th, .lines td { border: 1px solid #cbd5e1; padding: 4px 5px; }
+    .lines thead th {
+      background: #f1f5f9; font-size: 7pt; text-transform: uppercase;
+      letter-spacing: 0.05em; color: #334155;
+    }
+    .item-name { font-weight: 600; }
+
+    .totals { margin-top: 10px; display: flex; justify-content: flex-end; }
+    .totals-table { width: 52%; }
+    .totals-table td { padding: 3px 6px; border-bottom: 1px solid #e2e8f0; }
+    .totals-table td:first-child { color: #334155; }
+    .totals-table .grand td {
+      border-top: 2px solid #0f172a; border-bottom: 2px solid #0f172a;
+      font-size: 10pt; font-weight: 700; padding-top: 5px; padding-bottom: 5px;
+    }
+    .words { width: 100%; font-size: 7.5pt; margin-top: 7px; }
+
+    .footer { margin-top: 12px; display: flex; gap: 14px; align-items: flex-end; }
+    .footer-left { flex: 1; font-size: 7.5pt; line-height: 1.4; }
+    .footer-left .label {
+      font-size: 7pt; text-transform: uppercase; letter-spacing: 0.06em;
+      color: #64748b; margin-bottom: 2px;
+    }
+    /* The signature box is always drawn, even with no signature uploaded.
+       Reserving the space is the point: a blank area a customer can sign is
+       correct, whereas a block that only appears for some invoices shifts the
+       layout unpredictably. */
+    .sign-box { width: 46%; text-align: center; }
+    .sign-box .rule { border-top: 1px solid #0f172a; margin-bottom: 3px; }
+    .sign-box img { max-height: 42px; max-width: 100%; }
+    .sign-box .caption { font-size: 7pt; color: #64748b; }
+  </style>
+</head>
+<body>
+  {% include "Invoice_Templates/_header.html" %}
+  {% include "Invoice_Templates/_lines.html" %}
+  {% include "Invoice_Templates/_totals.html" %}
+
+  <div class="footer">
+    <div class="footer-left">
+      {% if bank.has_any %}
+        <div class="label">Bank details</div>
+        {% if bank.account_name %}<div>{{ bank.account_name }}</div>{% endif %}
+        {% if bank.name %}<div>{{ bank.name }}{% if bank.branch %} &mdash; {{ bank.branch }}{% endif %}</div>{% endif %}
+        {% if bank.account_number %}<div>A/c: {{ bank.account_number }}</div>{% endif %}
+        {% if bank.ifsc %}<div>IFSC: {{ bank.ifsc }}</div>{% endif %}
+      {% endif %}
+      {% if notes %}<div class="label" style="margin-top:6px">Notes</div><div>{{ notes }}</div>{% endif %}
+      {% if terms %}<div class="label" style="margin-top:6px">Terms</div><div>{{ terms }}</div>{% endif %}
+      <div class="muted" style="margin-top:6px">{{ meta.reverse_charge_line }}</div>
+    </div>
+
+    <div class="sign-box">
+      <div class="rule">
+        {% if supplier.has_signature %}<img src="{{ supplier.signature_url }}" alt="Signature">{% endif %}
+      </div>
+      <div class="caption">For {{ supplier.name }}</div>
+    </div>
+  </div>
+</body>
+</html>

@@ -1083,6 +1083,115 @@ try {
   // ===================================================================
   // EVENTS
   // ===================================================================
+  // ===================================================================
+  // PDF (2.3)
+  // ===================================================================
+  //
+  // The template list is read from the API rather than hardcoded, so adding a
+  // third layout is a backend change plus one HTML file and this picker
+  // updates itself. A failure here must not block the page: the two built-in
+  // options are already in the markup, so falling back to them is safe.
+
+  /** Load the available templates and populate the picker. */
+  async function loadPdfTemplates() {
+    try {
+      const data = await apiRequest("/invoices/pdf-templates/");
+      const select = $("pdf-template");
+      const previous = select.value;
+      select.replaceChildren(
+        ...(data.templates || []).map((t) => {
+          const option = new Option(t.label, t.key);
+          option.title = t.description || "";
+          return option;
+        })
+      );
+      // Keep the user's choice across a reload if it still exists.
+      const stillThere = (data.templates || []).some((t) => t.key === previous);
+      select.value = stillThere ? previous : data.default || "classic";
+    } catch {
+      /* The static options in the markup are already a valid fallback. */
+    }
+    updatePdfTemplateHint();
+  }
+
+  /** Describe the chosen layout, so picking one is not a guess. */
+  function updatePdfTemplateHint() {
+    const select = $("pdf-template");
+    const option = select.options[select.selectedIndex];
+    select.title = option ? option.title || "" : "";
+  }
+
+  /**
+   * Download the invoice as a PDF in the chosen template.
+   *
+   * Fetched rather than linked. A plain `<a href="/invoices/1/pdf/">` would not
+   * carry the bearer token, so it would answer 401 and the user would see an
+   * error page instead of a file. Fetch, turn the body into a Blob, and click a
+   * synthetic anchor.
+   */
+  async function downloadPdf() {
+    const invoiceId = new URLSearchParams(location.search).get("id");
+    if (!invoiceId) {
+      showToast("This invoice has not been saved yet.", "error");
+      return;
+    }
+    const template = $("pdf-template").value || "classic";
+    const url = `/invoices/${invoiceId}/pdf/?template=${encodeURIComponent(template)}`;
+
+    const button = $("print-btn");
+    button.disabled = true;
+    try {
+      const response = await fetch(`${API_BASE_URL}${url}`, {
+        headers: { Authorization: `Bearer ${Auth.access}` },
+      });
+
+      if (!response.ok) {
+        // The server sends a structured error body; prefer its message over a
+        // generic "download failed", because 503 in particular has an action
+        // attached to it (the host is missing Pango).
+        let message = `Could not generate the PDF (${response.status}).`;
+        try {
+          const body = await response.json();
+          if (body && body.message) message = body.message;
+        } catch {
+          /* Not JSON - keep the generic message. */
+        }
+        showToast(message, "error");
+        return;
+      }
+
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = `invoice-${template}.pdf`;
+      document.body.append(anchor);
+      anchor.click();
+      anchor.remove();
+      // Revoking immediately can cancel the download in some browsers.
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 10000);
+    } catch (err) {
+      showToast(err.message || "Could not reach the server.", "error");
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // TEST SEAMS (2.3)
+  // ------------------------------------------------------------------
+  //
+  // The PDF functions close over `$` and `showToast`, so a test cannot reach
+  // them by copying source out of this file - the earlier attempt at exactly
+  // that depended on a regex matching a closing brace and broke the moment the
+  // function grew a line. Evaluating the whole page and handing over the real
+  // functions tests what actually ships.
+  window.__testPdf = {
+    loadPdfTemplates,
+    updatePdfTemplateHint,
+    downloadPdf,
+  };
+
   function wireEvents() {
     $("party-search").addEventListener("input", debounce((event) => searchParties(event.target.value.trim()), 250));
     $("party-clear").addEventListener("click", () => {
@@ -1138,7 +1247,9 @@ try {
     $("cancel-btn").addEventListener("click", onCancelInvoice);
     $("copy-btn").addEventListener("click", onCopy);
     $("delete-btn").addEventListener("click", onDelete);
-    $("print-btn").addEventListener("click", () => window.print());
+    $("print-btn").addEventListener("click", downloadPdf);
+    $("pdf-template").addEventListener("change", updatePdfTemplateHint);
+    loadPdfTemplates();
 
     document.addEventListener("keydown", (event) => {
       if (event.key !== "Escape") return;

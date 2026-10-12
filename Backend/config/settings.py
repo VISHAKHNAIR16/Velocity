@@ -75,6 +75,7 @@ INSTALLED_APPS = [
     # and its tests are importable and discoverable.
     "apps.invoices",
     "apps.purchases",
+    "apps.documents",
     # Provides OutstandingToken/BlacklistedToken so a refresh token can be
     # invalidated. Without it a stolen refresh token is valid for its full
     # lifetime with no way to revoke it, and "sign out of this device" cannot
@@ -104,7 +105,11 @@ WSGI_APPLICATION = "config.wsgi.application"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        # Invoice PDF templates live in Backend/Invoice_Templates/, named
+        # "Invoice_Templates/invoice_classic.html" etc. DIRS points at BASE_DIR
+        # rather than at the folder itself so those names resolve; APP_DIRS
+        # alone only looks inside an app's own templates/ directory.
+        "DIRS": [BASE_DIR],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [

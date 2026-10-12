@@ -270,12 +270,19 @@ def issue_invoice(invoice_id: int, *, user=None) -> tuple[Invoice, bool, list]:
                 "invoice_number", "status", "issued_at", "issued_by",
                 "recipient_name", "recipient_gstin", "recipient_state_code",
                 "recipient_address", "shipping_address",
-                "business_name", "business_address", "business_gstin",
-                "business_state_code", "document_title", "place_of_supply",
-                "supply_type", "subtotal", "total_discount", "taxable_total",
-                "cgst_total", "sgst_total", "igst_total", "round_off",
-                "grand_total", "updated_at",
-            ]
+"business_name", "business_address", "business_gstin",
+                  "business_state_code", "document_title", "place_of_supply",
+                  "supply_type", "subtotal", "total_discount", "taxable_total",
+                  "cgst_total", "sgst_total", "igst_total", "round_off",
+                  "grand_total", "updated_at",
+                  # 2.3 letterhead. Listed explicitly because `update_fields`
+                  # is an allowlist: a snapshot that is computed and not named
+                  # here is silently discarded, and the invoice prints a blank
+                  # bank block forever with no error anywhere.
+                  "bank_account_name", "bank_account_number", "bank_ifsc",
+                  "bank_name", "bank_branch",
+                  "business_logo_url", "business_signature_url",
+              ]
         )
     except IntegrityError as exc:
         # Only the unique-number constraint is a race. Every other integrity
@@ -319,6 +326,16 @@ def _snapshot_parties(invoice: Invoice) -> None:
     )
     invoice.business_gstin = business.gstin or ""
     invoice.business_state_code = business.state_code or ""
+    # Letterhead, frozen at issue (2.3). Same reasoning as the fields above:
+    # the PDF has to keep showing what the customer was actually sent, even
+    # after the business corrects its bank details.
+    invoice.bank_account_name = business.bank_account_name or ""
+    invoice.bank_account_number = business.bank_account_number or ""
+    invoice.bank_ifsc = business.bank_ifsc or ""
+    invoice.bank_name = business.bank_name or ""
+    invoice.bank_branch = business.bank_branch or ""
+    invoice.business_logo_url = _file_url(business.logo)
+    invoice.business_signature_url = _file_url(business.signature)
     # A non-REGULAR business issues a Bill of Supply, never a Tax Invoice.
     invoice.document_title = (
         "Bill of Supply"
@@ -330,6 +347,28 @@ def _snapshot_parties(invoice: Invoice) -> None:
 def _compose_address(line, city, pincode) -> str:
     parts = [p for p in (line, city, pincode) if p]
     return ", ".join(str(p) for p in parts)
+
+
+def _file_url(field) -> str:
+    """
+    Absolute URL of an uploaded image, or "" when there is none.
+
+    Absolute because WeasyPrint resolves relative paths against the document's
+    base URL, not against the process's working directory - a relative
+    "business_logos/10/x.png" would 404 inside the container. Blank is a real,
+    expected value: no logo uploaded, or no signature uploaded.
+
+    `url` is accessed rather than `name` on purpose. When Cloudinary is
+    configured the storage backend serves a transformed public URL from `.url`;
+    `.name` would leak the raw remote path instead.
+    """
+    if not field:
+        return ""
+    try:
+        return field.url or ""
+    except (ValueError, NotImplementedError):
+        # No file associated, or the storage backend has no notion of a URL.
+        return ""
 
 
 # ---------------------------------------------------------------------------

@@ -449,3 +449,37 @@ things that will bite later if they are not recorded.
       can look different from the copy the customer received. If that ever matters (a disputed invoice),
       it becomes a snapshotted field plus a migration — noted here so the omission is a decision
       rather than an oversight.
+
+---
+
+## 9. Phase 2.3 (invoice PDFs) — follow-ups
+
+- [ ] ⚠️ **`update_fields` is an allowlist, and that is not obvious.** The issue path saves through an
+      explicit list of fields, so the new letterhead snapshots were computed, assigned to the model
+      instance and then silently discarded on save. No exception, no trace, and the PDF showed a blank
+      bank block for every invoice, forever. A snapshot that is not *named* in that list does not exist.
+      **This is the single most dangerous pattern in the invoicing code.**
+- [ ] **The rupee sign fails twice, in two different ways.** WeasyPrint's default font has no U+20B9 and
+      prints a box; the Windows console is cp1252 and raises `UnicodeEncodeError` on the same
+      character. `check_pdf_engine` detects the first by comparing two renders; the second was found by
+      the diagnostic itself crashing. Neither is a WeasyPrint bug, and neither would have surfaced in a
+      test that only asserted "a PDF came out".
+- [ ] **The template picker is driven by the API, not by hardcoded options.** `/invoices/pdf-templates/`
+      means a third layout is one HTML file plus one registry entry. The static `<option>` pair in the
+      markup is a deliberate fallback for when that call fails.
+- [ ] ⚠️ **PDF download is `fetch` + Blob, never a bare link.** An `<a href="/invoices/1/pdf/">` sends no
+      Authorization header and answers 401. The user sees a JSON error page where a file should be.
+- [ ] ⚠️ **The PDF is cached for a day, keyed by invoice + template + status + row count.** An issued
+      invoice is immutable so this is safe, but the key deliberately includes status and line count: a
+      cache keyed on the id alone would serve a draft's rendering to the issued document that replaced it.
+- [ ] **The cache is a database table, so it can fail.** `django_cache` going missing would otherwise turn
+      every PDF request into a 500 because of a speed optimisation. Both helpers swallow their errors
+      and degrade to "not cached".
+- [ ] **The backfill stamps today's bank details onto historical invoices.** Deliberate: wrong history
+      beats a blank box on a document the customer already holds. Recorded on the migration itself.
+- [ ] **WeasyPrint 70 changed `FontConfiguration`**: `font_directory` is gone and `font_map` is a raw
+      CFFI pointer that cannot be iterated from Python. Font introspection is therefore not available,
+      which is why glyph coverage is tested by *rendering* instead of by reading font tables.
+- [ ] **The engine check is a deployment tool, not a test.** `python manage.py check_pdf_engine` is the
+      one command that answers "why is the PDF button doing nothing". It exits 1 when Pango is missing
+      and 2 when the rupee glyph is unavailable, so a deploy script can gate on it.

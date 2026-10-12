@@ -1,0 +1,138 @@
+{% comment %}
+MODERN layout - hairline rules, generous whitespace, sans-serif. Clean, for
+retail.
+
+Deliberately a different *design*, not the Classic template with a restyle:
+no cell borders in the item table, a left-aligned grand total, and a wider
+measure. The figures still come from the same partials, so the two templates
+provably cannot disagree on money.
+{% endcomment %}<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{{ meta.title }} {{ meta.number }}</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 18mm 16mm 18mm 16mm;
+      @bottom-center {
+        content: counter(page);
+        font-size: 7.5pt;
+        color: #94a3b8;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "DejaVu Sans", "Noto Sans", "Liberation Sans", sans-serif;
+      font-size: 9pt;
+      color: #111827;
+      margin: 0;
+      line-height: 1.45;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    .num { text-align: right; }
+    .center { text-align: center; }
+    .muted { color: #6b7280; }
+    .small { font-size: 7.5pt; }
+    .strong { font-weight: 600; }
+
+    /* Accent bar instead of a boxed header. */
+    .doc-header {
+      display: flex; justify-content: space-between; align-items: flex-start;
+      padding-bottom: 14px;
+    }
+    .doc-header::after {
+      content: ""; display: block; position: relative; left: -16px; right: -16px;
+      height: 3px; background: #111827; margin-top: 14px;
+    }
+    .supplier-block { display: flex; gap: 12px; align-items: flex-start; }
+    .logo { width: 54px; height: 54px; object-fit: contain; border-radius: 4px; }
+    .supplier-name { font-size: 14pt; font-weight: 700; letter-spacing: -0.01em; }
+    .supplier-text { line-height: 1.4; }
+    .title-block { text-align: right; }
+    .doc-title {
+      font-size: 15pt; font-weight: 300; letter-spacing: 0.16em;
+      text-transform: uppercase; color: #374151;
+    }
+    .doc-number { font-size: 11pt; font-weight: 600; margin-top: 2px; }
+    .meta-table { width: auto; margin-left: auto; margin-top: 8px; }
+    .meta-table td { padding: 0 0 1px 14px; font-size: 7.5pt; }
+    .meta-table td:first-child { color: #6b7280; text-align: left; }
+
+    .parties { display: flex; gap: 22px; margin: 18px 0 6px; }
+    .party { flex: 1; }
+    .party .label {
+      font-size: 6.5pt; text-transform: uppercase; letter-spacing: 0.14em;
+      color: #9ca3af; margin-bottom: 4px;
+    }
+
+    /* Hairline rules, no vertical borders: the main visual difference from
+       Classic, and the reason the two are worth having. */
+    .lines { margin-top: 14px; }
+    .lines thead th {
+      font-size: 6.5pt; text-transform: uppercase; letter-spacing: 0.12em;
+      color: #9ca3af; font-weight: 600; padding: 0 6px 6px;
+      border-bottom: 1px solid #111827;
+    }
+    .lines tbody td { padding: 7px 6px; border-bottom: 1px solid #f3f4f6; }
+    .item-name { font-weight: 600; }
+
+    .totals { margin-top: 20px; display: flex; justify-content: flex-end; }
+    .totals-table { width: 46%; }
+    .totals-table td { padding: 4px 0; color: #4b5563; }
+    .totals-table .num { text-align: right; }
+    /* Grand total sits left of its own number, in its own block, rather than
+       inside the running total list. */
+    .totals-table .grand td {
+      padding-top: 10px; font-size: 12pt; font-weight: 700; color: #111827;
+    }
+    .words {
+      width: 100%; margin-top: 14px; padding-top: 10px; font-size: 8pt;
+      color: #4b5563; border-top: 1px solid #f3f4f6;
+    }
+
+    .footer {
+      margin-top: 30px; padding-top: 14px; border-top: 1px solid #111827;
+      display: flex; gap: 24px; align-items: flex-end;
+    }
+    .footer-left { flex: 1; font-size: 7.5pt; color: #4b5563; line-height: 1.5; }
+    .footer-left .label {
+      font-size: 6.5pt; text-transform: uppercase; letter-spacing: 0.12em;
+      color: #9ca3af; margin-bottom: 3px;
+    }
+    .sign-box { width: 38%; text-align: right; }
+    .sign-box img { max-height: 38px; max-width: 100%; }
+    .sign-box .caption {
+      font-size: 7pt; color: #6b7280; margin-top: 6px;
+      border-top: 1px solid #d1d5db; padding-top: 4px;
+    }
+  </style>
+</head>
+<body>
+  {% include "Invoice_Templates/_header.html" %}
+  {% include "Invoice_Templates/_lines.html" %}
+  {% include "Invoice_Templates/_totals.html" %}
+
+  <div class="footer">
+    <div class="footer-left">
+      {% if bank.has_any %}
+        <div class="label">Bank details</div>
+        {% if bank.account_name %}<div>{{ bank.account_name }}</div>{% endif %}
+        {% if bank.name %}<div>{{ bank.name }}{% if bank.branch %} &mdash; {{ bank.branch }}{% endif %}</div>{% endif %}
+        {% if bank.account_number %}<div>A/c: {{ bank.account_number }}</div>{% endif %}
+        {% if bank.ifsc %}<div>IFSC: {{ bank.ifsc }}</div>{% endif %}
+      {% endif %}
+      {% if notes %}<div class="label" style="margin-top:8px">Notes</div><div>{{ notes }}</div>{% endif %}
+      {% if terms %}<div class="label" style="margin-top:8px">Terms</div><div>{{ terms }}</div>{% endif %}
+      <div class="muted" style="margin-top:8px">{{ meta.reverse_charge_line }}</div>
+    </div>
+
+    {# Space reserved even with no signature, so an unsigned invoice does not
+       reflow differently from a signed one. #}
+    <div class="sign-box">
+      {% if supplier.has_signature %}<img src="{{ supplier.signature_url }}" alt="Signature">{% endif %}
+      <div class="caption">For {{ supplier.name }}</div>
+    </div>
+  </div>
+</body>
+</html>

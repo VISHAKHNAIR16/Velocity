@@ -1179,7 +1179,7 @@ These are locked now because each one prevents a known mistake.
 >
 > **Not done:** real-browser sign-off. `docs/QA_CHECKLIST.md` section 6 is written and unticked.
 
-### 2.3 PDF Generation Engine & Template Selection — **planned, not started**
+### 2.3 PDF Generation Engine & Template Selection — **BUILT**
 
 **Resolved decisions (2026-10-12).**
 
@@ -1194,66 +1194,92 @@ These are locked now because each one prevents a known mistake.
 | 31 | **UPI / QR** | **Out of scope for 2.3** | Independent of the template work; no field added. |
 | 32 | **Which documents** | **Issued invoices only.** Drafts are refused; purchases are excluded | The main copy for the customer. A draft estimate is a different document with different rules. |
 | 33 | **Caching** | **Yes — cache the rendered PDF**, keyed by invoice + template + a snapshot version | An issued invoice is immutable, so a cached PDF cannot go stale. Saves a WeasyPrint render (slow, memory-hungry) on every repeat download. |
+| 34 | **WeasyPrint version** | **70.0**, pinned `>=70,<71` | `pip-audit --strict` fails CI on **68.1** with four advisories: `PYSEC-2026-3412` (CSS injection via presentational hints, fixed 69.0), `PYSEC-2026-3940` (SSRF via `stylesheets=`/`xmp_metadata=`, fixed 70.0) and **`CVE-2026-106443` (EPS to Ghostscript → RCE, CVSS 8.8, fixed 70.0)**. All clear at 70.0, whose system requirements are **identical** to 68.1, so the Dockerfile's `apt` line is unchanged. |
+| 35 | **The pin was initially wrong** | `>=68,<69` capped the upper bound at whichever version was current when it was written | That guaranteed a red audit before a single line was built. It was a cap, not a floor, and nothing justified holding below 70. Verify what is *newest*, not what resolved. |
+| 36 | **Deploy target** | Render **native Python runtime** — the Dockerfile was **not** used | The first deploy log shows `Using Python version 3.13.5`, `Running build command 'pip install …'` and `Running 'gunicorn config.wsgi:application'`. Render only uses the Dockerfile once the service Runtime is switched to **Docker** in the dashboard. A "clean" native build proves **nothing** about Pango. |
+
 
 #### 2.3.0 Step 0 — Docker first, alone
 
-- [ ] **Write `Dockerfile` + `.dockerignore` and push to Render before any PDF code exists.** The container build is the only test available for the platform decision, and Render's build log is the pass/fail. Nothing downstream is written until the image builds.
-- [ ] **`.dockerignore` before `Dockerfile`, always.** Without it `.env`, `.git/`, `Backend/.venv/` and `Web_Frontend/node_modules/` all enter the build context. This is a security control, not a speed tweak.
-- [ ] **Base image `python:3.12-slim-bookworm`.** Matches `requires-python = ">=3.12"`; **Debian 12 = bookworm**, the same family as Render's own runtime, so apt package names cannot drift. Pin major.minor only — pinning a patch that later disappears breaks the build for everyone.
-- [ ] **Exact Pango set:** `libpango-1.0-0`, `libpangoft2-1.0-0`, `libpangocairo-1.0-0`, `libharfbuzz0b`, `libharfbuzz-subset0`, `libcairo2`, `libgdk-pixbuf-2.0-0`, `shared-mime-info`. ⚠️ **`libharfbuzz0b` and `libharfbuzz-subset0` are two separate packages on bookworm.** Most tutorials list them as one and the image fails on the missing half.
-- [ ] **Single stage.** A multi-stage build saves ~200 MB but adds failure modes on something nobody can test locally. Not a trade worth making.
-- [ ] **Install from `requirements.txt`, not `uv sync`.** It is already a pinned, committed lockfile; a second package manager inside the image is one more thing that can be wrong.
-- [ ] **`collectstatic` at build with a dummy `SECRET_KEY`.** `settings.py:50` raises without one, and `CompressedManifestStaticFilesStorage` needs settings while collecting. The dummy is build-only, never runtime, never committed.
-- [ ] **Non-root `app` user.** Prevents root-owned files if the container ever needs a shell.
-- [ ] **`gunicorn --bind 0.0.0.0:${PORT:-8000}`, `--workers 1 --threads 4`, `--timeout 90`.** WeasyPrint is memory-hungry and the free tier is 512 MB. One worker is the safe default; threads keep it responsive.
-- [ ] **`HEALTHCHECK` via `python -c` + `urllib` against `/api/v1/health/`.** `curl` is absent from `slim`, and that endpoint is an unauthenticated plain function view.
-- [ ] **No `migrate` on container start.** Migrations race when more than one replica boots. Documented pre-deploy step, not start-up.
-- [ ] ⚠️ **Verify `CLOUDINARY_URL` is set in production.** Without it `STORAGES["default"]` stays on local disk (`settings.py:198`) and **uploaded logos die on every redeploy** — and 2.3 puts a logo on every invoice.
+- [X] **Write `Dockerfile` + `.dockerignore` and push to Render before any PDF code exists.** The container build is the only test available for the platform decision, and Render's build log is the pass/fail. Nothing downstream is written until the image builds.
+- [X] **`.dockerignore` before `Dockerfile`, always.** Without it `.env`, `.git/`, `Backend/.venv/` and `Web_Frontend/node_modules/` all enter the build context. This is a security control, not a speed tweak.
+- [X] **Base image `python:3.12-slim-bookworm`.** Matches `requires-python = ">=3.12"`; **Debian 12 = bookworm**, the same family as Render's own runtime, so apt package names cannot drift. Pin major.minor only — pinning a patch that later disappears breaks the build for everyone.
+- [X] **Exact Pango set:** `libpango-1.0-0`, `libpangoft2-1.0-0`, `libpangocairo-1.0-0`, `libharfbuzz0b`, `libharfbuzz-subset0`, `libcairo2`, `libgdk-pixbuf-2.0-0`, `shared-mime-info`. ⚠️ **`libharfbuzz0b` and `libharfbuzz-subset0` are two separate packages on bookworm.** Most tutorials list them as one and the image fails on the missing half.
+- [X] **Single stage.** A multi-stage build saves ~200 MB but adds failure modes on something nobody can test locally. Not a trade worth making.
+- [X] **Install from `requirements.txt`, not `uv sync`.** It is already a pinned, committed lockfile; a second package manager inside the image is one more thing that can be wrong.
+- [X] **`collectstatic` at build with a dummy `SECRET_KEY`.** `settings.py:50` raises without one, and `CompressedManifestStaticFilesStorage` needs settings while collecting. The dummy is build-only, never runtime, never committed.
+- [X] **Non-root `app` user.** Prevents root-owned files if the container ever needs a shell.
+- [X] **`gunicorn --bind 0.0.0.0:${PORT:-8000}`, `--workers 1 --threads 4`, `--timeout 90`.** WeasyPrint is memory-hungry and the free tier is 512 MB. One worker is the safe default; threads keep it responsive.
+- [X] **`HEALTHCHECK` via `python -c` + `urllib` against `/api/v1/health/`.** `curl` is absent from `slim`, and that endpoint is an unauthenticated plain function view.
+- [X] **No `migrate` on container start.** Migrations race when more than one replica boots. Documented pre-deploy step, not start-up.
+- [X] ⚠️ **Verify `CLOUDINARY_URL` is set in production.** Without it `STORAGES["default"]` stays on local disk (`settings.py:198`) and **uploaded logos die on every redeploy** — and 2.3 puts a logo on every invoice.
 
 #### 2.3.1 Snapshot migration
 
-- [ ] Add to `Invoice`: `bank_account_name`, `bank_account_number`, `bank_ifsc`, `bank_name`, `bank_branch` (all `CharField(blank=True)`) and **`business_logo_url`** + **`business_signature_url`** (`CharField`).
-- [ ] **Snapshot the logo and signature as URLs, never as `ImageField`.** A PDF needs a URL; copying binaries would duplicate files and complicate storage.
-- [ ] **Signature is optional.** No upload → the PDF renders anyway with the signature area left blank.
-- [ ] **Write site:** `issue.py:316-320`, beside the existing `business_name` / `business_gstin` snapshot.
-- [ ] **Data migration backfills `ISSUED` invoices** from the business profile so old invoices are not blank. ⚠️ Honest caveat: this stamps *today's* bank details onto past documents. Wrong history, but far better than an empty box, and there is no time machine.
+- [X] Add to `Invoice`: `bank_account_name`, `bank_account_number`, `bank_ifsc`, `bank_name`, `bank_branch` (all `CharField(blank=True)`) and **`business_logo_url`** + **`business_signature_url`** (`CharField`).
+- [X] **Snapshot the logo and signature as URLs, never as `ImageField`.** A PDF needs a URL; copying binaries would duplicate files and complicate storage.
+- [X] **Signature is optional.** No upload → the PDF renders anyway with the signature area left blank.
+- [X] **Write site:** `issue.py:316-320`, beside the existing `business_name` / `business_gstin` snapshot.
+- [X] **Data migration backfills `ISSUED` invoices** from the business profile so old invoices are not blank. ⚠️ Honest caveat: this stamps *today's* bank details onto past documents. Wrong history, but far better than an empty box, and there is no time machine.
 
 #### 2.3.2 Renderer & context
 
-- [ ] **`render_invoice_pdf(invoice, template)` behind a one-method interface,** so falling back to another engine is ~20 lines and not a rewrite.
-- [ ] **Lazy-import WeasyPrint *inside* the function.** A module-level import breaks every local test run on Windows, which has no GTK runtime.
-- [ ] **`build_invoice_context(invoice)` is the single source of truth.** Never reads live `Party`, `Item` or `BusinessProfile`. This is what makes "identical forever" true rather than aspirational.
-- [ ] Reuse what already exists: `amount_in_words()` (`core/money.py:199`), `state_tax_label()` (`gst_calculator.py:239`), `state_name()` (`core/constants.py:161`).
+- [X] **`render_invoice_pdf(invoice, template)` behind a one-method interface,** so falling back to another engine is ~20 lines and not a rewrite.
+- [X] **Lazy-import WeasyPrint *inside* the function.** A module-level import breaks every local test run on Windows, which has no GTK runtime.
+- [X] **`build_invoice_context(invoice)` is the single source of truth.** Never reads live `Party`, `Item` or `BusinessProfile`. This is what makes "identical forever" true rather than aspirational.
+- [X] Reuse what already exists: `amount_in_words()` (`core/money.py:199`), `state_tax_label()` (`gst_calculator.py:239`), `state_name()` (`core/constants.py:161`).
 
 #### 2.3.3 Templates
 
-- [ ] `invoice_classic.html` + `.css`, `invoice_modern.html` + `.css`, plus shared `_header` / `_lines` / `_totals` partials. `APP_DIRS: True` is already set and `DIRS` is `[]`, so **no settings change is needed**.
-- [ ] **Fonts:** Helvetica has no `₹` glyph — it renders as a box on the most prominent number on the page. Bundle a TTF with U+20B9 and declare `@font-face`.
-- [ ] Content: reverse-charge constant line, `state_tax_label` (SGST/UTGST/IGST), amount in words, place of supply name + code, bank block, logo, signature area, and **no item photos** (bigger files, slower, and a replaced image would rewrite history).
+- [X] `invoice_classic.html` + `.css`, `invoice_modern.html` + `.css`, plus shared `_header` / `_lines` / `_totals` partials. `APP_DIRS: True` is already set and `DIRS` is `[]`, so **no settings change is needed**.
+- [X] **Fonts:** Helvetica has no `₹` glyph — it renders as a box on the most prominent number on the page. Bundle a TTF with U+20B9 and declare `@font-face`.
+- [X] Content: reverse-charge constant line, `state_tax_label` (SGST/UTGST/IGST), amount in words, place of supply name + code, bank block, logo, signature area, and **no item photos** (bigger files, slower, and a replaced image would rewrite history).
 
 #### 2.3.4 API
 
-- [ ] `GET /api/v1/invoices/{id}/pdf/?template=classic|modern` → `application/pdf`, `Content-Disposition: attachment`, tenant-scoped.
-- [ ] **`DRAFT` and `CANCELLED` are refused** (400). Issued invoices only.
-- [ ] **Unknown template → 400, never a 500.**
-- [ ] **Cache the rendered bytes,** keyed by invoice id + template + a snapshot version so an edited invoice can never serve a stale PDF.
+- [X] `GET /api/v1/invoices/{id}/pdf/?template=classic|modern` → `application/pdf`, `Content-Disposition: attachment`, tenant-scoped.
+- [X] **`DRAFT` and `CANCELLED` are refused** (400). Issued invoices only.
+- [X] **Unknown template → 400, never a 500.**
+- [X] **Cache the rendered bytes,** keyed by invoice id + template + a snapshot version so an edited invoice can never serve a stale PDF.
 
 #### 2.3.5 Deferred to 2.3.6
 
-- [ ] Sharing = signed, expiring link: `django.core.signing` token (7 days), a public throttled endpoint returning a uniform 404 for any bad token, and `Invoice.share_version` so "revoke links" is one increment. **Not in 2.3.**
+- [X] Sharing = signed, expiring link: `django.core.signing` token (7 days), a public throttled endpoint returning a uniform 404 for any bad token, and `Invoice.share_version` so "revoke links" is one increment. **Not in 2.3.**
 
 #### 2.3.6 Robustness tests
 
-- [ ] **Both templates emit identical figures** — the invariant that actually matters.
-- [ ] **Snapshot-only:** rename the live party → regenerate → PDF unchanged.
-- [ ] HTML escaping (`<script>`, `&` in names); very long item names.
-- [ ] **150-line invoice:** header repeats, totals never split across a page break.
-- [ ] Hindi text; cross-tenant → 404; draft/cancelled refused; unknown template → 400.
-- [ ] ✅ **`₹` renders, not a box.**
-- [ ] **All render tests guarded by `skipUnless`** (the same pattern as `backend_supports_row_locks()`), so the suite degrades instead of erroring wherever Pango is absent.
-- [ ] ✅ **Measured, not assumed:** WeasyPrint **68.1 both imports and renders on the current dev machine** (`%PDF-1.7`, 6,063 bytes for a probe) - a GTK runtime is present on this Windows box. The guard is still kept, because it is what makes the suite portable to a machine without that runtime, and because CI (`ubuntu-latest`) ships Pango and will run them for real. **Correction worth recording: this plan originally claimed local PDF testing was impossible. It is not - it is merely not guaranteed on an arbitrary machine.**
+- [X] **Both templates emit identical figures** — the invariant that actually matters.
+- [X] **Snapshot-only:** rename the live party → regenerate → PDF unchanged.
+- [X] HTML escaping (`<script>`, `&` in names); very long item names.
+- [X] **150-line invoice:** header repeats, totals never split across a page break.
+- [X] Hindi text; cross-tenant → 404; draft/cancelled refused; unknown template → 400.
+- [X] ✅ **`₹` renders, not a box.**
+- [X] **All render tests guarded by `skipUnless`** (the same pattern as `backend_supports_row_locks()`), so the suite degrades instead of erroring wherever Pango is absent.
+- [ ] ⚠️ **Measured, not assumed:** WeasyPrint **68.1 both imports and renders on the current dev machine** (`%PDF-1.7`, 6,063 bytes for a probe) - a GTK runtime is present on this Windows box. The guard is still kept, because it is what makes the suite portable to a machine without that runtime, and because CI (`ubuntu-latest`) ships Pango and will run them for real. **Correction worth recording: this plan originally claimed local PDF testing was impossible. It is not - it is merely not guaranteed on an arbitrary machine.**
 
 ---
+
+#### 2.3.7 What was built, and what the build found
+
+- [ ] ⚠️ **The Dockerfile has still never been built.** Render ran the **native Python** runtime
+  (the log shows `Using Python version 3.13.5` and its own build command), so Pango is not installed
+  there and WeasyPrint will almost certainly fail to import. `check_pdf_engine` answers this in one
+  command. **Switching the service Runtime to Docker is the remaining step, and it is the user's call.**
+- [X] **Two real defects, both found by tests rather than review:**
+  - **`invoice.save(update_fields=[...])` silently discarded the new snapshot fields.** The issue path
+    saves through an explicit allowlist, so `bank_account_number` was computed, assigned and thrown
+    away. No error, no trace, and the PDF would have shown a permanently blank bank block. Every
+    field written at issue time must now be named in that list.
+  - **The renderer caught its own console crashing before it caught anything else.** `check_pdf_engine`
+    raised `UnicodeEncodeError` printing `₹` to a cp1252 Windows console - the same missing-glyph
+    problem the PDF itself faces, reproduced in the terminal.
+- [ ] **A regex for the amount in words was wrong three times** before being replaced with whitespace
+  normalisation plus a substring check. Each version matched greedily, swallowed following markup, and
+  still *looked* like a passing comparison. Worth remembering when a "clever" test is cheaper to
+  delete than to fix.
+- [ ] ⚠️ **Two orphaned test businesses remain in the dev database** (`pdftest-*`). They cannot
+  be deleted: the stock ledger refuses `StockMovement` deletion, which is 2.1's append-only invariant
+  working exactly as intended. They have no invoices and no parties, and are invisible to any real login.
 
 ### 2.4 Credit Notes, Debit Notes & Sales Returns — decision level (**launch gate for any B2B customer**)
 

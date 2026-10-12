@@ -1,0 +1,42 @@
+{% comment %}
+Totals block, shared by both templates.
+
+Every figure here is the invoice's own stored value. Nothing in this file
+recomputes anything - the calculator's opinion lives in the *_computed columns
+for auditing, and a tax invoice must print what was issued, not what would be
+calculated today from a rate that may since have changed.
+{% endcomment %}
+<div class="totals">
+  <table class="totals-table">
+    <tr>
+      <td>Subtotal</td>
+      <td class="num">{{ totals.subtotal|floatformat:2 }}</td>
+    </tr>
+    <tr>
+      <td>Total discount</td>
+      <td class="num">{{ totals.total_discount|floatformat:2 }}</td>
+    </tr>
+    <tr>
+      <td>Taxable value</td>
+      <td class="num">{{ totals.taxable_total|floatformat:2 }}</td>
+    </tr>
+    <tr>
+      <td>{{ supply.tax_label }}</td>
+      <td class="num">{{ totals.tax_breakup.amount|floatformat:2 }}</td>
+    </tr>
+    {# Only rendered when non-zero. A "Round off 0.00" row implies rounding
+       happened when it did not. #}
+    {% if totals.round_off %}
+      <tr>
+        <td>Round off</td>
+        <td class="num">{{ totals.round_off|floatformat:2 }}</td>
+      </tr>
+    {% endif %}
+    <tr class="grand">
+      <td>Grand total</td>
+      <td class="num">₹ {{ totals.grand_total|floatformat:2 }}</td>
+    </tr>
+  </table>
+
+  <p class="words">Amount in words: <strong>{{ totals.in_words }}</strong></p>
+</div>

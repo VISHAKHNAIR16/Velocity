@@ -13,6 +13,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from django.db.models import Count, Q, Sum
+from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import filters, status
 from rest_framework.decorators import action
@@ -108,6 +109,79 @@ class InvoiceViewSet(TenantModelViewSet):
 
     def get_queryset(self):
         return self._apply_filters(super().get_queryset(), self.request.query_params)
+
+    @action(detail=True, methods=["get"])
+    def pdf(self, request, pk=None):
+        """
+        GET /api/v1/invoices/{id}/pdf/?template=classic|modern
+
+        Renders on demand and streams back. Nothing is stored: no
+        `pdf_file_url`, no cleanup job, and no way for the file to drift away
+        from the row it describes.
+
+        Tenant scoping is inherited from `self.get_object()` rather than a fresh
+        lookup, so another tenant's invoice is a 404 for exactly the same reason
+        as on every other endpoint here - not because someone remembered to add
+        a filter.
+        """
+        from apps.documents.services.errors import DocumentError
+        from apps.documents.services.renderer import (
+            DEFAULT_TEMPLATE,
+            get_template,
+            render_invoice_pdf,
+        )
+
+        invoice = self.get_object()
+        template_key = request.query_params.get("template") or DEFAULT_TEMPLATE
+
+        try:
+            pdf_bytes = render_invoice_pdf(invoice, template_key)
+        except DocumentError as exc:
+            # Each error carries its own status: 400 when the request was
+            # wrong, 503 when the server cannot render at all. One 500 for both
+            # would not tell a user whether to fix the URL or the host.
+            return Response(
+                {
+                    "success": False,
+                    "error": exc.code,
+                    "message": str(exc),
+                    "status": exc.status,
+                },
+                status=exc.status,
+            )
+
+        template = get_template(template_key)
+        stem = invoice.invoice_number or "invoice"
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="{stem}-{template.key}.pdf"'
+        # Immutable for a given (invoice, template), so it may be held.
+        response["Cache-Control"] = "private, max-age=86400"
+        return response
+
+    @action(detail=False, methods=["get"], url_path="pdf-templates")
+    def pdf_templates(self, request):
+        """
+        GET /api/v1/invoices/pdf-templates/ - what the picker should offer.
+
+        Read by the frontend instead of hardcoding the two options, so adding a
+        third template is a backend change plus one HTML file and the picker
+        updates itself.
+        """
+        from apps.documents.services.renderer import DEFAULT_TEMPLATE, TEMPLATES
+
+        return Response(
+            {
+                "default": DEFAULT_TEMPLATE,
+                "templates": [
+                    {
+                        "key": t.key,
+                        "label": t.label,
+                        "description": t.description,
+                    }
+                    for t in TEMPLATES.values()
+                ],
+            }
+        )
 
     @action(detail=False, methods=["get"])
     def stats(self, request):

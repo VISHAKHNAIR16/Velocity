@@ -6,6 +6,7 @@ from rest_framework.permissions import AllowAny
 from .views import (
     BusinessLogoView,
     BusinessProfileView,
+    BusinessSignatureView,
     GstRateListView,
     LogoutView,
     MeasuringUnitListView,
@@ -73,4 +74,7 @@ urlpatterns = [
     path("meta/units/", MeasuringUnitListView.as_view(), name="measuring-units"),
     path("meta/tax-rates/", GstRateListView.as_view(), name="gst-rates"),
     path("business/logo/", BusinessLogoView.as_view(), name="business-logo"),
+    path(
+        "business/signature/", BusinessSignatureView.as_view(), name="business-signature"
+    ),
 ]

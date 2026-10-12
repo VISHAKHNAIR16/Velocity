@@ -1,0 +1,55 @@
+{% comment %}
+Header + the footer block. Shared so the two templates present the same facts
+in the same order; only the visual treatment differs between them.
+
+Everything here comes from the invoice's frozen snapshots. The business block
+renders blank fields away rather than printing "—" or an empty rule, because a
+printed dash reads as "missing data" on a document a customer may rely on.
+{% endcomment %}
+<header class="doc-header">
+  <div class="supplier-block">
+    {% if supplier.has_logo %}
+      <img class="logo" src="{{ supplier.logo_url }}" alt="{{ supplier.name }} logo">
+    {% endif %}
+    <div class="supplier-text">
+      <div class="supplier-name">{{ supplier.name }}</div>
+      {% if supplier.address %}<div class="muted small">{{ supplier.address }}</div>{% endif %}
+      {% if supplier.gstin %}<div class="small">GSTIN: {{ supplier.gstin }}</div>{% endif %}
+      {% if supplier.state_code %}
+        <div class="muted small">{{ supplier.state_name }} ({{ supplier.state_code }})</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="title-block">
+    <div class="doc-title">{{ meta.title }}</div>
+    {% if meta.number %}<div class="doc-number">{{ meta.number }}</div>{% endif %}
+    <table class="meta-table">
+      <tr><td>Date</td><td class="num">{{ meta.date|date:"d/m/Y" }}</td></tr>
+      <tr>
+        <td>Place of supply</td>
+        <td class="num">{{ supply.place_of_supply_name }} ({{ supply.place_of_supply_code }})</td>
+      </tr>
+      <tr><td>Reverse charge</td><td class="num">No</td></tr>
+    </table>
+  </div>
+</header>
+
+<section class="parties">
+  <div class="party">
+    <div class="label">Billed to</div>
+    <div class="strong">{{ recipient.name }}</div>
+    {% if recipient.address %}<div class="muted small">{{ recipient.address }}</div>{% endif %}
+    {% if recipient.gstin %}<div class="small">GSTIN: {{ recipient.gstin }}</div>{% endif %}
+    {% if recipient.state_code %}
+      <div class="muted small">State: {{ recipient.state_name }} ({{ recipient.state_code }})</div>
+    {% endif %}
+  </div>
+
+  {% if shipping.is_different %}
+    <div class="party">
+      <div class="label">Ship to</div>
+      <div class="muted small">{{ shipping.address }}</div>
+    </div>
+  {% endif %}
+</section>

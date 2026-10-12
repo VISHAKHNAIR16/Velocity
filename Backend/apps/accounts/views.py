@@ -19,7 +19,12 @@ from apps.core.constants import (
 )
 
 from .models import BusinessProfile, UserSession
-from .serializers import BusinessProfileSerializer, LogoUploadSerializer, RegisterSerializer
+from .serializers import (
+    BusinessProfileSerializer,
+    LogoUploadSerializer,
+    RegisterSerializer,
+    SignatureUploadSerializer,
+)
 from .services import get_business
 from .sessions import (
     active_sessions,
@@ -211,6 +216,39 @@ class BusinessProfileView(RetrieveUpdateAPIView):
 
     def get_object(self) -> BusinessProfile:
         return get_business(self.request.user)
+
+
+class BusinessSignatureView(APIView):
+    """PUT /api/v1/business/signature/ uploads or replaces the signature/stamp.
+
+    DELETE removes it. Entirely optional: a business with no signature still
+    issues invoices, and the PDF simply leaves that area blank.
+    """
+
+    parser_classes = [MultiPartParser]
+
+    def put(self, request):
+        profile = get_business(request.user)
+        serializer = SignatureUploadSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        old_name = profile.signature.name
+        profile.signature = serializer.validated_data["signature"]
+        profile.save(update_fields=["signature", "updated_at"])
+
+        # Remove the previous file only after the new one is safely stored.
+        if old_name and old_name != profile.signature.name:
+            profile.signature.storage.delete(old_name)
+
+        return Response(
+            BusinessProfileSerializer(profile, context={"request": request}).data
+        )
+
+    def delete(self, request):
+        profile = get_business(request.user)
+        if profile.signature:
+            profile.signature.delete(save=True)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class BusinessLogoView(APIView):

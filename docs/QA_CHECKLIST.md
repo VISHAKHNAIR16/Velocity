@@ -202,6 +202,54 @@ After the run above, both of these must exit 0:
 - [ ] A supplier's bill numbers with a **gap** (SUP-001 then SUP-900) is **not** reported. Only
       duplicates are.
 
+## 7. Invoice PDF (2.3)
+
+> Requires the engine. Run `python manage.py check_pdf_engine` on the server first -
+> if it reports UNAVAILABLE, none of this will work and the host needs Pango.
+
+### 7a. The picker
+
+- [ ] An **issued** invoice shows **Download PDF** with a template dropdown
+- [ ] A **draft** shows no download button at all
+- [ ] Picking **Classic** downloads a bordered, formal layout
+- [ ] Picking **Modern** downloads a clean, rule-only layout - visibly different
+- [ ] The two downloads agree on **every number**, including the amount in words
+- [ ] The filename carries the invoice number and the template name
+- [ ] The invoice list row has a PDF action on issued invoices
+
+### 7b. The document itself
+
+- [ ] The grand total shows **`₹`** - not a box, not a blank
+- [ ] GSTIN, address and place of supply (name **and** code) are present
+- [ ] The amount in words matches the grand total
+- [ ] The line table header says **CGST / SGST / IGST** separately, in that order
+- [ ] "Tax payable on reverse charge: No" appears
+- [ ] Bank details appear **only** if they were filled in
+- [ ] The signature area is drawn **even with no signature uploaded** - blank, not missing
+- [ ] A logo appears if one was uploaded
+
+### 7c. The guarantee that matters
+
+- [ ] Note the bank account number on a business, issue an invoice, download it
+- [ ] **Change** the bank account number on the business profile
+- [ ] Download the **same already-issued** invoice again
+- [ ] It still shows the **original** number. It must not rewrite history.
+- [ ] Rename the customer, download again - the old name is still there
+- [ ] Change an item's rate, download again - the old rate is still there
+
+### 7d. Long documents
+
+- [ ] Open a draft with about **150 lines**, issue it, download it
+- [ ] The **column headings repeat** on page 2 onward
+- [ ] The grand total is **not split** across a page break
+- [ ] File size is sane (a 150-line invoice should be well under 1 MB)
+
+### 7e. Hostile input
+
+- [ ] Rename a customer to `<script>alert(1)</script>` and issue - the PDF shows
+      the text, and nothing executes
+- [ ] A customer name of **50+ characters** does not break the table
+
 ---
 
 ## Known gaps — do not tick these

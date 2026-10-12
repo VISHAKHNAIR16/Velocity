@@ -120,6 +120,36 @@ class Invoice(TenantModel):
     business_state_code = models.CharField(max_length=2, blank=True, default="")
     document_title = models.CharField(max_length=20, blank=True, default="Tax Invoice")
 
+    # --- Letterhead snapshots (2.3) -------------------------------------
+    # The PDF has to show a bank account and a logo, and the PDF must keep
+    # showing what the customer was actually sent. Reading these live off
+    # BusinessProfile would mean that correcting a mistyped account number
+    # silently rewrites every invoice already issued.
+    #
+    # Stored as URLs rather than copied files: the renderer needs a URL, and a
+    # duplicated binary would need its own storage and lifecycle. Blank is a
+    # legitimate state for every one of these - a business with no bank account
+    # still issues invoices - so the PDF renders with the block simply absent
+    # rather than with a placeholder that reads as real data.
+    bank_account_name = models.CharField(max_length=120, blank=True, default="")
+    bank_account_number = models.CharField(max_length=40, blank=True, default="")
+    bank_ifsc = models.CharField(max_length=20, blank=True, default="")
+    bank_name = models.CharField(max_length=120, blank=True, default="")
+    bank_branch = models.CharField(max_length=120, blank=True, default="")
+    business_logo_url = models.URLField(max_length=500, blank=True, default="")
+    # Optional by design (2.3 decision 30). Never uploaded means the PDF still
+    # renders and the signature area is simply left empty - a business that
+    # does not use a stamp must still be able to invoice.
+    business_signature_url = models.URLField(max_length=500, blank=True, default="")
+
+    @property
+    def has_bank_details(self) -> bool:
+        return bool(self.bank_account_number or self.bank_ifsc)
+
+    @property
+    def has_signature(self) -> bool:
+        return bool(self.business_signature_url)
+
     # --- Money (always recomputed, never accepted from the client) ------
     subtotal = models.DecimalField(max_digits=14, decimal_places=2, default=ZERO)
     invoice_discount = models.DecimalField(
