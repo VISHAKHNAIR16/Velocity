@@ -74,8 +74,11 @@ INSTALLED_APPS = [
     # Phase 1.4: added now (before its models exist) so the Step B calculator
     # and its tests are importable and discoverable.
     "apps.invoices",
-    "apps.purchases",
     "apps.documents",
+    # Phase 3: payments (3.1) — PaymentRecord model and /api/v1/payments/.
+    "apps.payments",
+    # Phase 3: dashboard (3.3) — /api/v1/dashboard/stats/ and /api/v1/dashboard/low-stock/.
+    "apps.dashboard",
     # Provides OutstandingToken/BlacklistedToken so a refresh token can be
     # invalidated. Without it a stolen refresh token is valid for its full
     # lifetime with no way to revoke it, and "sign out of this device" cannot

@@ -11,18 +11,69 @@
 <body class="min-h-screen">
   <header id="nav" class="bg-navy"></header>
 
-  <main class="mx-auto max-w-4xl px-4 py-10">
-    <h1 id="welcome" class="text-2xl font-bold">Welcome</h1>
-    <p class="mt-1 text-sm text-muted">Here is your business at a glance.</p>
+  <main class="mx-auto max-w-7xl px-4 py-8">
+    <h1 id="welcome" class="text-2xl font-bold text-navy">Welcome</h1>
+    <p class="mt-1 text-sm text-muted" id="welcome-sub">
+      Here is your business at a glance.
+    </p>
 
-    <div id="setup-banner" class="mt-4 hidden rounded border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800">
+    <div id="setup-banner" class="mt-6 hidden rounded border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800">
       Finish your business setup (address and state) before billing.
       <a href="/business/profile.html" class="font-semibold underline">Complete profile</a>
     </div>
 
-    <div class="mt-8 grid gap-4 sm:grid-cols-2">
-      <div class="card text-muted">Parties (coming next)</div>
-      <div class="card text-muted">Items (coming soon)</div>
+    <!-- Metric cards -->
+    <div id="metric-cards" class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <!-- Cards injected by dashboard.js -->
+    </div>
+
+    <!-- Low-stock alerts -->
+    <div class="mt-8">
+      <h2 class="text-lg font-semibold text-navy mb-4">Low Stock Alerts</h2>
+      <div id="low-stock-container" class="rounded border border-slate-200 bg-white">
+        <table class="w-full text-left text-sm">
+          <thead class="bg-slate-50">
+            <tr>
+              <th class="px-4 py-2 font-medium text-slate-600">Item</th>
+              <th class="px-4 py-2 font-medium text-slate-600">Code</th>
+              <th class="px-4 py-2 font-medium text-slate-600">On Hand</th>
+              <th class="px-4 py-2 font-medium text-slate-600">Min Level</th>
+              <th class="px-4 py-2 font-medium text-slate-600">Status</th>
+            </tr>
+          </thead>
+          <tbody id="low-stock-body">
+            <!-- Rows injected by dashboard.js -->
+          </tbody>
+        </table>
+      </div>
+      <p id="low-stock-empty" class="mt-2 text-sm text-slate-500 hidden">
+        No low-stock items. All tracked products are above their alert threshold.
+      </p>
+    </div>
+
+    <!-- Recent transactions -->
+    <div class="mt-8">
+      <h2 class="text-lg font-semibold text-navy mb-4">Recent Payments</h2>
+      <div id="recent-payments-container" class="rounded border border-slate-200 bg-white">
+        <table class="w-full text-left text-sm">
+          <thead class="bg-slate-50">
+            <tr>
+              <th class="px-4 py-2 font-medium text-slate-600">Date</th>
+              <th class="px-4 py-2 font-medium text-slate-600">Party</th>
+              <th class="px-4 py-2 font-medium text-slate-600">Type</th>
+              <th class="px-4 py-2 font-medium text-slate-600">Amount</th>
+              <th class="px-4 py-2 font-medium text-slate-600">Mode</th>
+              <th class="px-4 py-2 font-medium text-slate-600">Reference</th>
+            </tr>
+          </thead>
+          <tbody id="recent-payments-body">
+            <!-- Rows injected by dashboard.js -->
+          </tbody>
+        </table>
+      </div>
+      <p id="recent-payments-empty" class="mt-2 text-sm text-slate-500 hidden">
+        No recent payments.
+      </p>
     </div>
   </main>
 

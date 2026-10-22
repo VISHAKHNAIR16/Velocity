@@ -26,12 +26,13 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/v1/health/", health_check, name="health-check"),
     path("api/v1/health/db/", db_health_check, name="db-health-check"),
-  path("api/v1/health/diagnostics/", diagnostics_check, name="health-diagnostics"),
+    path("api/v1/health/diagnostics/", diagnostics_check, name="health-diagnostics"),
     path("api/v1/", include("apps.accounts.urls")),
     path("api/v1/", include("apps.parties.urls")),
     path("api/v1/", include("apps.inventory.urls")),
     path("api/v1/", include("apps.invoices.urls")),
-path("api/v1/", include("apps.purchases.urls")),
+    path("api/v1/", include("apps.payments.urls")),
+    path("api/v1/", include("apps.dashboard.urls")),
 ]
 
 # Development only: serve locally uploaded files when Cloudinary isn't configured.

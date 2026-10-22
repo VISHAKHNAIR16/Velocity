@@ -183,8 +183,7 @@ jobs:
           uv run python manage.py test
           apps.invoices.tests.test_concurrency
           apps.inventory.tests_stock_concurrency
-          apps.purchases.tests_concurrency
-          --settings=config.settings_test_pg
+                --settings=config.settings_test_pg
           --noinput
           --verbosity 2
 

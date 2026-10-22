@@ -9,11 +9,16 @@ from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
+from django.test import TestCase
 from django.urls import reverse
-from rest_framework.test import APITestCase
+from django.utils import timezone
+from rest_framework import status
+from rest_framework.test import APIClient, APITestCase
 
 from apps.accounts.models import BusinessProfile
+from apps.invoices.models import Invoice
 from apps.parties.models import Party
+from apps.payments.models import PaymentRecord
 
 User = get_user_model()
 PASSWORD = "Str0ng!Pass#2026"
@@ -141,9 +146,7 @@ class PartyTenantIsolationTests(APITestCase):
         url = reverse("party-detail", args=[self.party_b.pk])
         for method in ("patch", "put"):
             with self.subTest(method=method):
-                response = getattr(self.client, method)(
-                    url, {"name": "Hijacked"}, format="json"
-                )
+                response = getattr(self.client, method)(url, {"name": "Hijacked"}, format="json")
                 self.assertEqual(response.status_code, 404)
         self.party_b.refresh_from_db()
         self.assertEqual(self.party_b.name, "Beta Customer")
@@ -289,7 +292,7 @@ class PartyCrudTests(APITestCase):
         response = self.client.delete(reverse("party-detail", args=[party.pk]))
         self.assertEqual(response.status_code, 204)
         party.refresh_from_db()
-        self.assertFalse(party.is_active)          # flagged, not removed
+        self.assertFalse(party.is_active)  # flagged, not removed
         self.assertTrue(Party.objects.filter(pk=party.pk).exists())
 
     def test_soft_deleted_party_leaves_the_default_list(self):
@@ -360,12 +363,25 @@ class PartyFilterTests(APITestCase):
         self.list_url = reverse("party-list")
         self.client.force_authenticate(self.user)
 
-        make_party(self.business, name="Cust One", party_type="CUSTOMER",
-                   gstin="", pan="", email="cust1@example.com")
-        make_party(self.business, name="Supp One", party_type="SUPPLIER",
-                   gstin="", pan="", mobile="9000000001")
-        make_party(self.business, name="Both One", party_type="BOTH",
-                   gstin="", pan="", mobile="9000000002")
+        make_party(
+            self.business,
+            name="Cust One",
+            party_type="CUSTOMER",
+            gstin="",
+            pan="",
+            email="cust1@example.com",
+        )
+        make_party(
+            self.business,
+            name="Supp One",
+            party_type="SUPPLIER",
+            gstin="",
+            pan="",
+            mobile="9000000001",
+        )
+        make_party(
+            self.business, name="Both One", party_type="BOTH", gstin="", pan="", mobile="9000000002"
+        )
 
     def names(self, **params):
         return {p["name"] for p in self.client.get(self.list_url, params).data["results"]}
@@ -392,7 +408,9 @@ class PartyFilterTests(APITestCase):
         self.assertEqual(self.names(search="cust1@"), {"Cust One"})
 
     def test_ordering_by_name_desc(self):
-        names = [p["name"] for p in self.client.get(self.list_url, {"ordering": "-name"}).data["results"]]
+        names = [
+            p["name"] for p in self.client.get(self.list_url, {"ordering": "-name"}).data["results"]
+        ]
         self.assertEqual(names, sorted(names, reverse=True))
 
 
@@ -410,30 +428,44 @@ class PartySoftDeleteReuseTests(APITestCase):
         self.user, self.business = make_user("owner@example.com", "Reuse Traders")
 
     def test_soft_deleted_partys_gstin_can_be_reused(self):
-        deleted = make_party(self.business, name="Deleted One", gstin="", pan="",
-                             mobile="9000000001")
+        deleted = make_party(
+            self.business, name="Deleted One", gstin="", pan="", mobile="9000000001"
+        )
         deleted.gstin = "36ABCCS2942R1ZR"
         deleted.pan = "ABCCS2942R"
         deleted.is_active = False
         deleted.save()
 
         # Same GSTIN, different party, still active -> allowed now.
-        replacement = make_party(self.business, name="Replacement",
-                                 gstin="36ABCCS2942R1ZR", pan="ABCCS2942R",
-                                 mobile="9000000002")
+        replacement = make_party(
+            self.business,
+            name="Replacement",
+            gstin="36ABCCS2942R1ZR",
+            pan="ABCCS2942R",
+            mobile="9000000002",
+        )
         self.assertEqual(replacement.gstin, "36ABCCS2942R1ZR")
 
     def test_duplicate_still_blocked_while_both_are_active(self):
-        make_party(self.business, name="First", gstin="36ABCCS2942R1ZR", pan="ABCCS2942R",
-                   mobile="9000000003")
+        make_party(
+            self.business,
+            name="First",
+            gstin="36ABCCS2942R1ZR",
+            pan="ABCCS2942R",
+            mobile="9000000003",
+        )
         with self.assertRaises(IntegrityError):
             with transaction.atomic():
-                make_party(self.business, name="Second", gstin="36ABCCS2942R1ZR",
-                           pan="", mobile="9000000004")
+                make_party(
+                    self.business,
+                    name="Second",
+                    gstin="36ABCCS2942R1ZR",
+                    pan="",
+                    mobile="9000000004",
+                )
 
     def test_restore_succeeds_when_identifier_is_free(self):
-        party = make_party(self.business, name="Restorable", gstin="", pan="",
-                           mobile="9000000005")
+        party = make_party(self.business, name="Restorable", gstin="", pan="", mobile="9000000005")
         party.gstin = "29AAACA1234A1Z5"
         party.pan = "AAACA1234A"
         party.is_active = False
@@ -446,15 +478,15 @@ class PartySoftDeleteReuseTests(APITestCase):
         self.assertTrue(party.is_active)
 
     def test_restore_returns_400_when_gstin_was_taken_meanwhile(self):
-        released = make_party(self.business, name="Released", gstin="", pan="",
-                              mobile="9000000006")
+        released = make_party(self.business, name="Released", gstin="", pan="", mobile="9000000006")
         released.gstin = "29AAACA1234A1Z5"
         released.pan = "AAACA1234A"
         released.is_active = False
         released.save()
 
-        make_party(self.business, name="New owner", gstin="29AAACA1234A1Z5", pan="",
-                   mobile="9000000007")
+        make_party(
+            self.business, name="New owner", gstin="29AAACA1234A1Z5", pan="", mobile="9000000007"
+        )
 
         self.client.force_authenticate(self.user)
         response = self.client.post(reverse("party-restore", args=[released.pk]))
@@ -481,8 +513,12 @@ class PartyShippingStateTests(APITestCase):
     def test_shipping_state_is_accepted_with_a_shipping_address(self):
         response = self.client.post(
             self.list_url,
-            self.payload(shipping_address="9 Warehouse Rd", shipping_city="Pune",
-                         shipping_pincode="411001", shipping_state_code="27"),
+            self.payload(
+                shipping_address="9 Warehouse Rd",
+                shipping_city="Pune",
+                shipping_pincode="411001",
+                shipping_state_code="27",
+            ),
             format="json",
         )
         self.assertEqual(response.status_code, 201)
@@ -513,8 +549,9 @@ class PartyShippingStateTests(APITestCase):
         self.assertEqual(response.data["shipping_state_code"], "")
 
     def test_patch_clearing_shipping_address_must_clear_shipping_state_too(self):
-        party = make_party(self.business, name="Has shipping", gstin="", pan="",
-                           mobile="9000000008")
+        party = make_party(
+            self.business, name="Has shipping", gstin="", pan="", mobile="9000000008"
+        )
         party.shipping_address = "9 Warehouse Rd"
         party.shipping_state_code = "27"
         party.save()
@@ -528,8 +565,9 @@ class PartyShippingStateTests(APITestCase):
         self.assertIn("shipping_state_code", response.data["errors"])
 
     def test_patch_of_an_unrelated_field_keeps_the_shipping_state(self):
-        party = make_party(self.business, name="Keep shipping", gstin="", pan="",
-                           mobile="9000000009")
+        party = make_party(
+            self.business, name="Keep shipping", gstin="", pan="", mobile="9000000009"
+        )
         party.shipping_address = "9 Warehouse Rd"
         party.shipping_state_code = "27"
         party.save()
@@ -544,8 +582,15 @@ class PartyShippingStateTests(APITestCase):
     def test_shipping_state_does_not_leak_across_tenants(self):
         """The field is per-party, so tenant scoping must be unaffected."""
         self.user_b, self.business_b = make_user("b@example.com", "Beta Stores")
-        make_party(self.business_b, name="Beta item", shipping_address="1 Elsewhere",
-                   shipping_state_code="33", gstin="", pan="", mobile="9000000010")
+        make_party(
+            self.business_b,
+            name="Beta item",
+            shipping_address="1 Elsewhere",
+            shipping_state_code="33",
+            gstin="",
+            pan="",
+            mobile="9000000010",
+        )
 
         self.client.force_authenticate(self.user)
         names = {p["name"] for p in self.client.get(self.list_url).data["results"]}
@@ -557,10 +602,12 @@ class PartyModelTests(APITestCase):
         self.user, self.business = make_user("owner@example.com", "Model Traders")
 
     def test_opening_balance_signed_is_decimal_and_signed_by_direction(self):
-        credit = make_party(self.business, name="Owes Us",
-                            opening_balance=Decimal("1500.50"), balance_type="CREDIT")
-        debit = make_party(self.business, name="We Owe",
-                           opening_balance=Decimal("1500.50"), balance_type="DEBIT")
+        credit = make_party(
+            self.business, name="Owes Us", opening_balance=Decimal("1500.50"), balance_type="CREDIT"
+        )
+        debit = make_party(
+            self.business, name="We Owe", opening_balance=Decimal("1500.50"), balance_type="DEBIT"
+        )
 
         self.assertIsInstance(credit.opening_balance_signed, Decimal)
         self.assertEqual(credit.opening_balance_signed, Decimal("1500.50"))
@@ -568,8 +615,9 @@ class PartyModelTests(APITestCase):
 
     def test_opening_balance_signed_survives_repeated_arithmetic(self):
         """Decimal arithmetic must stay exact where float would drift."""
-        party = make_party(self.business, name="Rounding",
-                           opening_balance=Decimal("0.10"), balance_type="CREDIT")
+        party = make_party(
+            self.business, name="Rounding", opening_balance=Decimal("0.10"), balance_type="CREDIT"
+        )
         total = party.opening_balance_signed
         for _ in range(10):
             total += Decimal("0.10")
@@ -577,28 +625,134 @@ class PartyModelTests(APITestCase):
         self.assertEqual(str(total), "1.10")
 
     def test_shipping_address_falls_back_to_billing(self):
-        party = make_party(self.business, name="Fallback",
-                           billing_address="1 Main St", billing_city="Pune",
-                           billing_pincode="411001")
-        self.assertEqual(
-            party.get_shipping_address_lines(), ["1 Main St", "Pune", "411001"]
+        party = make_party(
+            self.business,
+            name="Fallback",
+            billing_address="1 Main St",
+            billing_city="Pune",
+            billing_pincode="411001",
         )
+        self.assertEqual(party.get_shipping_address_lines(), ["1 Main St", "Pune", "411001"])
 
     def test_shipping_address_is_used_when_present(self):
-        party = make_party(self.business, name="Separate",
-                           shipping_address="9 Warehouse Rd",
-                           shipping_city="Navi Mumbai", shipping_pincode="400708")
+        party = make_party(
+            self.business,
+            name="Separate",
+            shipping_address="9 Warehouse Rd",
+            shipping_city="Navi Mumbai",
+            shipping_pincode="400708",
+        )
         self.assertEqual(
             party.get_shipping_address_lines(),
             ["9 Warehouse Rd", "Navi Mumbai", "400708"],
         )
 
     def test_is_registered_reflects_gstin_presence(self):
-        self.assertTrue(make_party(self.business, name="Reg", gstin="29AAACA1234A1Z5",
-                                   pan="AAACA1234A").is_registered)
-        self.assertFalse(make_party(self.business, name="Unreg", gstin="", pan="",
-                                    mobile="9111111111").is_registered)
+        self.assertTrue(
+            make_party(
+                self.business, name="Reg", gstin="29AAACA1234A1Z5", pan="AAACA1234A"
+            ).is_registered
+        )
+        self.assertFalse(
+            make_party(
+                self.business, name="Unreg", gstin="", pan="", mobile="9111111111"
+            ).is_registered
+        )
 
     def test_display_state_returns_readable_name(self):
         party = make_party(self.business, name="Telangana Party", state_code="36")
         self.assertEqual(party.get_display_state(), "Telangana")
+
+
+class PartyStatementTests(TestCase):
+    """Party statement / ledger endpoint (3.2)."""
+
+    def setUp(self):
+        self.user, self.business = make_user("owner@example.com", "Owner Traders")
+        self.client_ = APIClient()
+        self.client_.force_authenticate(self.user)
+        self.customer = make_party(self.business, name="Sharma Stores", state_code="36")
+        self.supplier = make_party(
+            self.business, name="Supplier Co", state_code="36", party_type="SUPPLIER"
+        )
+
+    def test_statement_returns_running_balance(self):
+        """Invoices (debit) and payments (credit) fold into a running balance."""
+        # Opening balance: customer owes us 500
+        self.customer.opening_balance = Decimal("500.00")
+        self.customer.balance_type = Party.BalanceType.CREDIT
+        self.customer.save()
+
+        invoice = Invoice.objects.create(
+            business=self.business,
+            party=self.customer,
+            invoice_date="2026-01-10",
+            status=Invoice.Status.ISSUED,
+            invoice_number="INV/26-27/00010",
+            issued_at=timezone.now(),
+            grand_total=Decimal("1000.00"),
+            paid_amount=Decimal("0.00"),
+            balance_due=Decimal("1000.00"),
+            payment_status=Invoice.PaymentStatus.UNPAID,
+        )
+
+        # Payment of 400 against the invoice
+        PaymentRecord.objects.create(
+            business=self.business,
+            party=self.customer,
+            transaction_type=PaymentRecord.TransactionType.PAYMENT_IN,
+            payment_date="2026-01-15",
+            payment_mode="UPI",
+            amount=Decimal("400.00"),
+            invoice=invoice,
+        )
+
+        response = self.client_.get(f"/api/v1/parties/{self.customer.pk}/statement/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.content)
+        data = response.json()
+
+        self.assertEqual(data["party"]["name"], "Sharma Stores")
+        self.assertEqual(data["totals"]["total_billed"], "1000.00")
+        self.assertEqual(data["totals"]["total_paid"], "400.00")
+        self.assertEqual(data["totals"]["pending_balance"], "1100.00")  # 500 + 1000 - 400
+
+        entries = data["entries"]
+        self.assertEqual(len(entries), 2)
+        # Opening balance is not an entry; first entry is the invoice
+        self.assertEqual(entries[0]["type"], "SALES_INVOICE")
+        self.assertEqual(entries[0]["debit"], "1000.00")
+        self.assertEqual(entries[0]["balance"], "1500.00")  # 500 + 1000
+        self.assertEqual(entries[1]["type"], "PAYMENT_RECEIVED")
+        self.assertEqual(entries[1]["credit"], "400.00")
+        self.assertEqual(entries[1]["balance"], "1100.00")  # 1500 - 400
+
+    def test_statement_date_filter(self):
+        """start_date / end_date narrow the entries."""
+        Invoice.objects.create(
+            business=self.business,
+            party=self.customer,
+            invoice_date="2026-01-10",
+            status=Invoice.Status.ISSUED,
+            invoice_number="INV/26-27/00011",
+            issued_at=timezone.now(),
+            grand_total=Decimal("1000.00"),
+            paid_amount=Decimal("0.00"),
+            balance_due=Decimal("1000.00"),
+            payment_status=Invoice.PaymentStatus.UNPAID,
+        )
+
+        response = self.client_.get(
+            f"/api/v1/parties/{self.customer.pk}/statement/?start_date=2026-02-01"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertEqual(len(data["entries"]), 0)
+        self.assertEqual(data["totals"]["total_billed"], "0")
+
+    def test_statement_tenant_isolation(self):
+        """Another business's parties cannot be statemented."""
+        other_user, other_business = make_user("other@example.com", "Other Traders")
+        other_client = APIClient()
+        other_client.force_authenticate(other_user)
+        response = other_client.get(f"/api/v1/parties/{self.customer.pk}/statement/")
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)

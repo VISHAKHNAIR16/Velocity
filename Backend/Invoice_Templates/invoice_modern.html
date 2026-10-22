@@ -1,138 +1,455 @@
 {% comment %}
-MODERN layout - hairline rules, generous whitespace, sans-serif. Clean, for
-retail.
+=============================================================================
+invoice_format_1.html  -  TAX INVOICE, "Format 1" (boxed GST layout)
+=============================================================================
+Self-contained: replaces invoice_classic.html, invoice_modern.html and the
+_header / _lines / _totals partials. Renders with WeasyPrint.
 
-Deliberately a different *design*, not the Classic template with a restyle:
-no cell borders in the item table, a left-aligned grand total, and a wider
-measure. The figures still come from the same partials, so the two templates
-provably cannot disagree on money.
+CONTEXT CONTRACT (same names your partials already use)
+  supplier  : name, address, gstin, state_code, state_name, has_logo, logo_url,
+              has_signature, signature_url                (optional: phone, email)
+  recipient : name, address, gstin, state_code, state_name   (optional: phone)
+  shipping  : is_different, address
+  meta      : title, number, date, reverse_charge_line
+              (optional: due_date, copy_label, digitally_signed)
+  supply    : place_of_supply_name, place_of_supply_code, tax_label
+  lines[]   : name, is_service, hsn, quantity, unit, unit_price,
+              taxable_value, igst, cgst, sgst, total
+              (optional: description, tax_rate, tax_amount)
+  totals    : subtotal, total_discount, taxable_total, tax_breakup.amount,
+              round_off, grand_total, in_words   (optional: total_quantity)
+  bank      : has_any, account_name, name, branch, account_number, ifsc
+  notes, terms
+  OPTIONAL extras (blocks are skipped cleanly when absent):
+    hsn_summary[] : hsn, taxable_value, rate, tax_amount
+    hsn_total     : taxable_value, tax_amount
+    payment       : is_paid
+    upi_qr_url    : URL / data-URI of a UPI QR image
+
+RULES KEPT FROM YOUR ORIGINAL TEMPLATES
+  * Every figure is a stored value; nothing is recomputed here.
+  * Quantity keeps its own precision (never run through intcomma).
+  * Font list starts with DejaVu Sans: it has the rupee glyph (U+20B9).
+  * Blank fields are dropped, not printed as dashes.
+=============================================================================
 {% endcomment %}<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <title>{{ meta.title }} {{ meta.number }}</title>
   <style>
+    /* ---- Palette (Velocity brand) ------------------------------------ */
+    :root {
+      --navy:  #0F172A;   /* text + all box borders      */
+      --blue:  #2563EB;   /* "TAX INVOICE" title          */
+      --cyan:  #06B6D4;   /* thin accent rule             */
+      --slate: #64748B;   /* secondary text               */
+      --tint:  #F1F5F9;   /* table header background      */
+    }
+
+    /* ---- Page: A4, running footer with page numbers ------------------- */
     @page {
       size: A4;
-      margin: 18mm 16mm 18mm 16mm;
-      @bottom-center {
-        content: counter(page);
+      margin: 10mm 10mm 16mm 10mm;
+      @bottom-left {
+        content: "Page " counter(page) " / " counter(pages)
+                 {% if meta.digitally_signed %} "     This is a digitally signed document."{% endif %};
+        font-family: "DejaVu Sans", "Noto Sans", sans-serif;
         font-size: 7.5pt;
-        color: #94a3b8;
+        color: #0F172A;
       }
     }
+
     * { box-sizing: border-box; }
     body {
       font-family: "DejaVu Sans", "Noto Sans", "Liberation Sans", sans-serif;
-      font-size: 9pt;
-      color: #111827;
+      font-size: 8pt;
+      line-height: 1.35;
+      color: var(--navy);
       margin: 0;
-      line-height: 1.45;
     }
     table { width: 100%; border-collapse: collapse; }
-    .num { text-align: right; }
+    td, th { vertical-align: top; }
+    tr { page-break-inside: avoid; }
+
+    .num    { text-align: right; }
     .center { text-align: center; }
-    .muted { color: #6b7280; }
-    .small { font-size: 7.5pt; }
-    .strong { font-weight: 600; }
+    .muted  { color: var(--slate); }
+    .strong { font-weight: 700; }
+    .small  { font-size: 7.2pt; }
+    .label  { font-weight: 700; }
 
-    /* Accent bar instead of a boxed header. */
-    .doc-header {
-      display: flex; justify-content: space-between; align-items: flex-start;
-      padding-bottom: 14px;
-    }
-    .doc-header::after {
-      content: ""; display: block; position: relative; left: -16px; right: -16px;
-      height: 3px; background: #111827; margin-top: 14px;
-    }
-    .supplier-block { display: flex; gap: 12px; align-items: flex-start; }
-    .logo { width: 54px; height: 54px; object-fit: contain; border-radius: 4px; }
-    .supplier-name { font-size: 14pt; font-weight: 700; letter-spacing: -0.01em; }
-    .supplier-text { line-height: 1.4; }
-    .title-block { text-align: right; }
-    .doc-title {
-      font-size: 15pt; font-weight: 300; letter-spacing: 0.16em;
-      text-transform: uppercase; color: #374151;
-    }
-    .doc-number { font-size: 11pt; font-weight: 600; margin-top: 2px; }
-    .meta-table { width: auto; margin-left: auto; margin-top: 8px; }
-    .meta-table td { padding: 0 0 1px 14px; font-size: 7.5pt; }
-    .meta-table td:first-child { color: #6b7280; text-align: left; }
+    /* One outer frame; each section below only adds a top border. */
+    .frame { border: 1.5px solid var(--navy); }
+    .section { border-top: 1.5px solid var(--navy); }
 
-    .parties { display: flex; gap: 22px; margin: 18px 0 6px; }
-    .party { flex: 1; }
-    .party .label {
-      font-size: 6.5pt; text-transform: uppercase; letter-spacing: 0.14em;
-      color: #9ca3af; margin-bottom: 4px;
+    /* ---- 1. Title bar ------------------------------------------------- */
+    .titlebar td { padding: 5px 8px; }
+    .titlebar .title {
+      text-align: center; font-size: 12pt; font-weight: 700;
+      letter-spacing: 0.22em; color: var(--blue);
+    }
+    .titlebar .copy {
+      text-align: right; font-size: 7pt; font-weight: 700;
+      letter-spacing: 0.14em; text-transform: uppercase; width: 28%;
+    }
+    .titlebar .spacer { width: 28%; }
+
+    /* ---- 2. Supplier / customer (left)  +  meta / shipping (right) ---- */
+    .top > tbody > tr > td { padding: 0; }
+    .top .left  { width: 50%; border-right: 1.5px solid var(--navy); }
+    .top .right { width: 50%; }
+    .box { padding: 7px 9px; }
+    .box + .box { border-top: 1.5px solid var(--navy); }
+
+    .supplier { display: table; width: 100%; }
+    .supplier .logo-cell { display: table-cell; width: 70px; vertical-align: top; }
+    .supplier .text-cell { display: table-cell; vertical-align: top; padding-left: 6px; }
+    .logo { width: 62px; height: 62px; object-fit: contain; }
+    .supplier-name { font-size: 11pt; font-weight: 700; }
+
+    .meta td { padding: 5px 9px; width: 50%; }
+    .meta tr + tr td { border-top: 1.5px solid var(--navy); }
+    .meta td + td { border-left: 1.5px solid var(--navy); }
+    .meta .value { font-weight: 700; }
+
+    /* ---- 3. Line items ------------------------------------------------ */
+    .lines th {
+      background: var(--tint); font-size: 7.2pt; font-weight: 600;
+      padding: 4px 5px; border-right: 1px solid var(--navy);
+      border-bottom: 1.5px solid var(--navy);
+    }
+    .lines th:last-child, .lines td:last-child { border-right: 0; }
+    .lines td { padding: 4px 5px; border-right: 1px solid var(--navy); }
+    .lines .item-name { font-weight: 700; }
+    .lines .desc { white-space: pre-line; color: var(--navy); }
+    /* Filler row keeps the vertical column rules running down the page on
+       short invoices, as in the reference layout. Skipped for long ones. */
+    .lines .filler td { height: 62mm; padding: 0; }
+
+    /* ---- 4. Totals ----------------------------------------------------- */
+    .totals td { padding: 3px 8px; border-bottom: 1px solid var(--navy); }
+    .totals .count { font-size: 7.8pt; }
+    .totals .lbl { text-align: right; font-weight: 700; width: 30%; }
+    .totals .amt { text-align: right; font-weight: 700; width: 22%; }
+    .totals .grand td {
+      font-size: 14pt; font-weight: 700; padding: 5px 8px;
+      border-bottom: 1.5px solid var(--navy);
+    }
+    .words { padding: 3px 8px; font-size: 8pt; border-bottom: 1px solid var(--navy); }
+
+    /* ---- 5. HSN summary ----------------------------------------------- */
+    .hsn th, .hsn td { padding: 3px 6px; border: 1px solid var(--navy); }
+    .hsn th { background: #fff; font-weight: 600; }
+    .hsn tr:first-child th, .hsn tr:first-child td { border-top: 0; }
+    .hsn th:first-child, .hsn td:first-child { border-left: 0; }
+    .hsn th:last-child,  .hsn td:last-child  { border-right: 0; }
+    .hsn .total-row td { font-weight: 700; }
+
+    /* ---- 6. Paid strip -------------------------------------------------- */
+    .paid { text-align: right; padding: 4px 8px; font-size: 10pt; font-weight: 700; }
+    .paid .tick {
+      display: inline-block; width: 12px; height: 12px; border-radius: 50%;
+      background: #16A34A; color: #fff; font-size: 8pt; line-height: 12px;
+      text-align: center; margin-right: 4px;
     }
 
-    /* Hairline rules, no vertical borders: the main visual difference from
-       Classic, and the reason the two are worth having. */
-    .lines { margin-top: 14px; }
-    .lines thead th {
-      font-size: 6.5pt; text-transform: uppercase; letter-spacing: 0.12em;
-      color: #9ca3af; font-weight: 600; padding: 0 6px 6px;
-      border-bottom: 1px solid #111827;
-    }
-    .lines tbody td { padding: 7px 6px; border-bottom: 1px solid #f3f4f6; }
-    .item-name { font-weight: 600; }
+    /* ---- 7. Bank / UPI / signature ------------------------------------- */
+    .pay > tbody > tr > td { padding: 0; }
+    .pay .bank  { width: 46%; padding: 7px 9px; }
+    .pay .upi   { width: 22%; padding: 7px 4px; }
+    .pay .sign  { width: 32%; padding: 7px 9px; border-left: 1.5px solid var(--navy); text-align: right; }
+    .bank td { padding: 1px 0; font-size: 8.5pt; }
+    .bank td:first-child { width: 28%; color: var(--navy); }
+    .bank td:last-child  { font-weight: 700; }
+    .upi img { width: 30mm; height: 30mm; margin-top: 3px; }
+    .sign .for { font-size: 7.5pt; color: var(--slate); }
+    /* Space is reserved even without a signature image, so unsigned and
+       signed invoices lay out identically. */
+    .sign .sig-area { height: 30mm; text-align: center; padding-top: 4px; }
+    .sign .sig-area img { max-height: 28mm; max-width: 100%; }
+    .sign .auth { font-size: 7.5pt; color: var(--slate); }
 
-    .totals { margin-top: 20px; display: flex; justify-content: flex-end; }
-    .totals-table { width: 46%; }
-    .totals-table td { padding: 4px 0; color: #4b5563; }
-    .totals-table .num { text-align: right; }
-    /* Grand total sits left of its own number, in its own block, rather than
-       inside the running total list. */
-    .totals-table .grand td {
-      padding-top: 10px; font-size: 12pt; font-weight: 700; color: #111827;
-    }
-    .words {
-      width: 100%; margin-top: 14px; padding-top: 10px; font-size: 8pt;
-      color: #4b5563; border-top: 1px solid #f3f4f6;
-    }
-
-    .footer {
-      margin-top: 30px; padding-top: 14px; border-top: 1px solid #111827;
-      display: flex; gap: 24px; align-items: flex-end;
-    }
-    .footer-left { flex: 1; font-size: 7.5pt; color: #4b5563; line-height: 1.5; }
-    .footer-left .label {
-      font-size: 6.5pt; text-transform: uppercase; letter-spacing: 0.12em;
-      color: #9ca3af; margin-bottom: 3px;
-    }
-    .sign-box { width: 38%; text-align: right; }
-    .sign-box img { max-height: 38px; max-width: 100%; }
-    .sign-box .caption {
-      font-size: 7pt; color: #6b7280; margin-top: 6px;
-      border-top: 1px solid #d1d5db; padding-top: 4px;
-    }
+    /* ---- 8. Notes / terms ------------------------------------------------ */
+    .nt > tbody > tr > td { padding: 7px 9px; }
+    .nt .notes { width: 50%; border-right: 1.5px solid var(--navy); }
+    .nt .terms-text, .nt .notes-text { white-space: pre-line; }
   </style>
 </head>
 <body>
-  {% include "Invoice_Templates/_header.html" %}
-  {% include "Invoice_Templates/_lines.html" %}
-  {% include "Invoice_Templates/_totals.html" %}
+<div class="frame">
 
-  <div class="footer">
-    <div class="footer-left">
-      {% if bank.has_any %}
-        <div class="label">Bank details</div>
-        {% if bank.account_name %}<div>{{ bank.account_name }}</div>{% endif %}
-        {% if bank.name %}<div>{{ bank.name }}{% if bank.branch %} &mdash; {{ bank.branch }}{% endif %}</div>{% endif %}
-        {% if bank.account_number %}<div>A/c: {{ bank.account_number }}</div>{% endif %}
-        {% if bank.ifsc %}<div>IFSC: {{ bank.ifsc }}</div>{% endif %}
+  <!-- ===== 1. TITLE BAR ================================================== -->
+  <table class="titlebar">
+    <tr>
+      <td class="spacer"></td>
+      <td class="title">{{ meta.title|default:"TAX INVOICE"|upper }}</td>
+      <td class="copy">{{ meta.copy_label|default:"Original for recipient" }}</td>
+    </tr>
+  </table>
+
+  <!-- ===== 2. SUPPLIER / CUSTOMER  +  META / SHIPPING ==================== -->
+  <table class="top section">
+    <tr>
+      <!-- LEFT: supplier, then customer -->
+      <td class="left">
+        <div class="box">
+          <div class="supplier">
+            {% if supplier.has_logo %}
+              <div class="logo-cell">
+                <img class="logo" src="{{ supplier.logo_url }}" alt="{{ supplier.name }} logo">
+              </div>
+            {% endif %}
+            <div class="text-cell">
+              <div class="supplier-name">{{ supplier.name }}</div>
+              {% if supplier.gstin %}<div class="strong">GSTIN {{ supplier.gstin }}</div>{% endif %}
+              {% if supplier.address %}<div>{{ supplier.address }}</div>{% endif %}
+              {% if supplier.state_code %}
+                <div>{{ supplier.state_name }} ({{ supplier.state_code }})</div>
+              {% endif %}
+              {% if supplier.phone %}<div><span class="strong">Mobile</span> {{ supplier.phone }}</div>{% endif %}
+              {% if supplier.email %}<div><span class="strong">Email</span> {{ supplier.email }}</div>{% endif %}
+            </div>
+          </div>
+        </div>
+
+        <div class="box">
+          <div class="label">Customer Details:</div>
+          <div class="strong">{{ recipient.name }}</div>
+          {% if recipient.gstin %}<div>GSTIN: {{ recipient.gstin }}</div>{% endif %}
+          {% if recipient.address %}
+            <div class="label">Billing address:</div>
+            <div>{{ recipient.address }}</div>
+          {% endif %}
+          {% if recipient.state_code %}
+            <div>State: {{ recipient.state_name }} ({{ recipient.state_code }})</div>
+          {% endif %}
+          {% if recipient.phone %}<div>Ph: {{ recipient.phone }}</div>{% endif %}
+        </div>
+      </td>
+
+      <!-- RIGHT: invoice meta grid, then shipping address -->
+      <td class="right">
+        <table class="meta">
+          <tr>
+            <td>
+              <div class="label">Invoice #:</div>
+              <div class="value">{{ meta.number }}</div>
+            </td>
+            <td>
+              <div class="label">Invoice Date:</div>
+              <div class="value">{{ meta.date|date:"d M Y" }}</div>
+            </td>
+          </tr>
+          <tr>
+            <td>
+              <div class="label">Place of Supply:</div>
+              <div class="value">{{ supply.place_of_supply_code }}-{{ supply.place_of_supply_name|upper }}</div>
+            </td>
+            <td>
+              {% if meta.due_date %}
+                <div class="label">Due Date:</div>
+                <div>{{ meta.due_date|date:"d M Y" }}</div>
+              {% else %}
+                <div class="label">Reverse charge:</div>
+                <div>No</div>
+              {% endif %}
+            </td>
+          </tr>
+        </table>
+
+        {% if shipping.is_different %}
+          <div class="box" style="border-top:1.5px solid #0F172A; min-height: 28mm;">
+            <div class="label">Shipping address:</div>
+            <div>{{ shipping.address }}</div>
+          </div>
+        {% endif %}
+      </td>
+    </tr>
+  </table>
+
+  <!-- ===== 3. LINE ITEMS ================================================= -->
+  <table class="lines section">
+    <thead>
+      <tr>
+        <th style="width:4%">#</th>
+        <th style="width:27%; text-align:left">Item</th>
+        <th class="num" style="width:10%">HSN/SAC</th>
+        <th class="num" style="width:11%">Rate/ Item</th>
+        <th class="num" style="width:8%">Qty</th>
+        <th class="num" style="width:12%">Taxable Value</th>
+        <th class="num" style="width:14%">Tax Amount</th>
+        <th class="num" style="width:14%">Amount</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for line in lines %}
+        <tr>
+          <td>{{ forloop.counter }}</td>
+          <td>
+            <div class="item-name">{{ line.name }}</div>
+            {% if line.description %}<div class="desc">{{ line.description }}</div>{% endif %}
+            {% if line.is_service %}<div class="muted small">Service</div>{% endif %}
+          </td>
+          <td class="num">{{ line.hsn|default:"" }}</td>
+          <td class="num strong">{{ line.unit_price|floatformat:2 }}</td>
+          {# "-3" prints up to 3 decimals but drops trailing zeros: 2 -> 2, 2.5 -> 2.5 #}
+          <td class="num">{{ line.quantity|floatformat:"-3" }}{% if line.unit %} {{ line.unit }}{% endif %}</td>
+          <td class="num">{{ line.taxable_value|floatformat:2 }}</td>
+          <td class="num">
+            {% if supply.tax_label == "IGST" %}
+              {{ line.igst|floatformat:2 }}
+            {% else %}
+              {# Intra-state: show both halves. Never add Decimals with |add. #}
+              <div>CGST {{ line.cgst|floatformat:2 }}</div>
+              <div>SGST {{ line.sgst|floatformat:2 }}</div>
+            {% endif %}
+            {% if line.tax_rate %}<div class="muted small">({{ line.tax_rate|floatformat:"-2" }}%)</div>{% endif %}
+          </td>
+          <td class="num strong">{{ line.total|floatformat:2 }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="8" class="muted center">This invoice has no lines.</td></tr>
+      {% endfor %}
+
+      {% if lines|length < 8 %}
+        <tr class="filler">
+          <td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>
+        </tr>
       {% endif %}
-      {% if notes %}<div class="label" style="margin-top:8px">Notes</div><div>{{ notes }}</div>{% endif %}
-      {% if terms %}<div class="label" style="margin-top:8px">Terms</div><div>{{ terms }}</div>{% endif %}
-      <div class="muted" style="margin-top:8px">{{ meta.reverse_charge_line }}</div>
-    </div>
+    </tbody>
+  </table>
 
-    {# Space reserved even with no signature, so an unsigned invoice does not
-       reflow differently from a signed one. #}
-    <div class="sign-box">
-      {% if supplier.has_signature %}<img src="{{ supplier.signature_url }}" alt="Signature">{% endif %}
-      <div class="caption">For {{ supplier.name }}</div>
-    </div>
-  </div>
+  <!-- ===== 4. TOTALS ===================================================== -->
+  <table class="totals section">
+    <tr>
+      <td class="count">
+        Total Items / Qty : {{ lines|length }}{% if totals.total_quantity %} / {{ totals.total_quantity|floatformat:3 }}{% endif %}
+      </td>
+      <td class="lbl">Taxable Amount</td>
+      <td class="amt">₹{{ totals.taxable_total|floatformat:2 }}</td>
+    </tr>
+    {% if totals.total_discount %}
+      <tr>
+        <td></td>
+        <td class="lbl">Discount</td>
+        <td class="amt">₹{{ totals.total_discount|floatformat:2 }}</td>
+      </tr>
+    {% endif %}
+    <tr>
+      <td></td>
+      <td class="lbl">{{ supply.tax_label }}</td>
+      <td class="amt">₹{{ totals.tax_breakup.amount|floatformat:2 }}</td>
+    </tr>
+    {# Only when non-zero: "Round off 0.00" implies rounding that did not happen. #}
+    {% if totals.round_off %}
+      <tr>
+        <td></td>
+        <td class="lbl">Round off</td>
+        <td class="amt">₹{{ totals.round_off|floatformat:2 }}</td>
+      </tr>
+    {% endif %}
+    <tr class="grand">
+      <td></td>
+      <td class="lbl">Total</td>
+      <td class="amt">₹{{ totals.grand_total|floatformat:2 }}</td>
+    </tr>
+  </table>
+  <div class="words">Total amount (in words): {{ totals.in_words }}</div>
+
+  <!-- ===== 5. HSN SUMMARY (only when the view supplies hsn_summary) ====== -->
+  {% if hsn_summary %}
+    <table class="hsn">
+      <tr>
+        <th rowspan="2" style="text-align:left; width:20%">HSN/SAC</th>
+        <th rowspan="2" class="num" style="width:20%">Taxable Value</th>
+        <th colspan="2" class="center">{% if supply.tax_label == "IGST" %}Integrated Tax{% else %}CGST + SGST{% endif %}</th>
+        <th rowspan="2" class="num" style="width:20%">Total Tax Amount</th>
+      </tr>
+      <tr>
+        <th class="center">Rate</th>
+        <th class="center">Amount</th>
+      </tr>
+      {% for row in hsn_summary %}
+        <tr>
+          <td>{{ row.hsn }}</td>
+          <td class="num">{{ row.taxable_value|floatformat:2 }}</td>
+          <td class="center">{{ row.rate|floatformat:"-2" }}%</td>
+          <td class="center">{{ row.tax_amount|floatformat:2 }}</td>
+          <td class="num">{{ row.tax_amount|floatformat:2 }}</td>
+        </tr>
+      {% endfor %}
+      {% if hsn_total %}
+        <tr class="total-row">
+          <td class="num">TOTAL</td>
+          <td class="num">{{ hsn_total.taxable_value|floatformat:2 }}</td>
+          <td></td>
+          <td class="center">{{ hsn_total.tax_amount|floatformat:2 }}</td>
+          <td class="num">{{ hsn_total.tax_amount|floatformat:2 }}</td>
+        </tr>
+      {% endif %}
+    </table>
+  {% endif %}
+
+  <!-- ===== 6. PAID STRIP ================================================= -->
+  {% if payment.is_paid %}
+    <div class="paid section"><span class="tick">✓</span>Amount Paid</div>
+  {% endif %}
+
+  <!-- ===== 7. BANK / UPI / SIGNATURE ====================================== -->
+  <table class="pay section">
+    <tr>
+      <td class="bank">
+        {% if bank.has_any %}
+          <div class="label">Bank Details:</div>
+          <table>
+            {% if bank.name %}<tr><td>Bank:</td><td>{{ bank.name }}</td></tr>{% endif %}
+            {% if bank.account_name %}<tr><td>Name:</td><td>{{ bank.account_name }}</td></tr>{% endif %}
+            {% if bank.account_number %}<tr><td>Account #:</td><td>{{ bank.account_number }}</td></tr>{% endif %}
+            {% if bank.ifsc %}<tr><td>IFSC:</td><td>{{ bank.ifsc }}</td></tr>{% endif %}
+            {% if bank.branch %}<tr><td>Branch:</td><td>{{ bank.branch }}</td></tr>{% endif %}
+          </table>
+        {% endif %}
+      </td>
+
+      <td class="upi">
+        {% if upi_qr_url %}
+          <div class="label">Pay using UPI:</div>
+          <img src="{{ upi_qr_url }}" alt="UPI QR code">
+        {% endif %}
+      </td>
+
+      <td class="sign">
+        <div class="for">For {{ supplier.name }}</div>
+        <div class="sig-area">
+          {% if supplier.has_signature %}<img src="{{ supplier.signature_url }}" alt="Signature">{% endif %}
+        </div>
+        <div class="auth">Authorized Signatory</div>
+      </td>
+    </tr>
+  </table>
+
+  <!-- ===== 8. NOTES / TERMS =============================================== -->
+  <table class="nt section">
+    <tr>
+      <td class="notes">
+        {% if notes %}
+          <div class="label">Notes:</div>
+          <div class="notes-text">{{ notes }}</div>
+        {% endif %}
+      </td>
+      <td>
+        {% if terms %}
+          <div class="label">Terms and Conditions:</div>
+          <div class="terms-text">{{ terms }}</div>
+        {% endif %}
+        {% if meta.reverse_charge_line %}
+          <div class="muted small" style="margin-top:4px">{{ meta.reverse_charge_line }}</div>
+        {% endif %}
+      </td>
+    </tr>
+  </table>
+
+</div>
 </body>
 </html>

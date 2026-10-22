@@ -152,55 +152,10 @@ After the run above, both of these must exit 0:
 - [ ] Deleting a user who owns invoices is refused
 - [ ] Closing an account deactivates rather than deletes
 
-## 6. Purchases (2.2)
+## 6. Purchases (2.2) — **REMOVED 2026-10-12; nothing to test here**
 
-### 6a. Entering a bill
-
-- [ ] New Purchase opens with a **supplier** picker (suppliers only; walk-ins are excluded)
-- [ ] Typing a bill number already used by that supplier this year is refused, and the message
-      explains why
-- [ ] The same number from a *different* supplier is accepted
-- [ ] **Check Figures** compares your typed totals against the calculator
-- [ ] If they agree it says so in green
-- [ ] If they differ it says **"your numbers will be saved exactly as entered"** — the wording
-      matters: nothing on this page may overwrite a figure you typed
-- [ ] There is no control anywhere that writes the computed figures into the form
-
-### 6b. Stock
-
-- [ ] Posting a bill **increases** stock by the line quantities
-- [ ] A freight / free-text line posts fine and moves **no** stock
-- [ ] Posting twice (double-click) adds the stock **once**
-- [ ] A posted bill's money fields are locked, with a reason shown
-
-### 6c. Cancelling
-
-- [ ] Cancelling takes the stock back
-- [ ] `Stock History` shows **both** rows — the original purchase and the reversal
-- [ ] Cancelling twice removes the stock once
-- [ ] A reason is required
-- [ ] Set the policy to **BLOCK**, sell the goods on, then try to cancel: refused, and the message
-      names **which item** and what the balance would become
-
-### 6d. Two bills, one item (concurrency)
-
-- [ ] Open two tabs, post a bill for the same item in each
-- [ ] **Both** succeed and the stock rises by the sum — goods genuinely arrived twice
-- [ ] `reconcile_stock` reports no drift afterwards
-
-### 6e. Integrity
-
-```
-.\dev.ps1 audit          # audit_purchases
-.\dev.ps1 reconcile
-.\dev.ps1 preflight
-```
-
-- [ ] `audit_purchases` exits 0
-- [ ] Deliberately post a bill whose grand total is wrong: `audit_purchases` reports `DIVERGENCE`
-      and exits 1 — but the bill still saved exactly what you typed
-- [ ] A supplier's bill numbers with a **gap** (SUP-001 then SUP-900) is **not** reported. Only
-      duplicates are.
+> The purchases module was removed in full. This section is kept so the gap in
+> the numbering is explained rather than looking like an oversight.
 
 ## 7. Invoice PDF (2.3)
 

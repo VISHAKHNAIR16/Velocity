@@ -46,6 +46,19 @@ class InvoiceStatus(models.TextChoices):
     CANCELLED = "CANCELLED", "Cancelled"
 
 
+class PaymentStatus(models.TextChoices):
+    """
+    Module level, not nested inside `Invoice`.
+
+    `Invoice.PaymentStatus` is kept as an alias below, so existing
+    `Invoice.PaymentStatus.UNPAID` references keep working.
+    """
+
+    UNPAID = "UNPAID", "Unpaid"
+    PARTIAL = "PARTIAL", "Partially Paid"
+    PAID = "PAID", "Paid"
+
+
 class Invoice(TenantModel):
     """
     A customer invoice.
@@ -57,6 +70,9 @@ class Invoice(TenantModel):
 
     #: Back-compat alias. `Invoice.Status.DRAFT` is used across the codebase.
     Status = InvoiceStatus
+
+    #: Back-compat alias. `Invoice.PaymentStatus.UNPAID` is used across the codebase.
+    PaymentStatus = PaymentStatus
 
     class SupplyType(models.TextChoices):
         INTRA = "INTRA", "Intra-state (CGST + SGST/UTGST)"
@@ -87,6 +103,25 @@ class Invoice(TenantModel):
     # --- Lifecycle ------------------------------------------------------
     status = models.CharField(
         max_length=10, choices=Status.choices, default=Status.DRAFT, db_index=True
+    )
+    payment_status = models.CharField(
+        max_length=10,
+        choices=PaymentStatus.choices,
+        default=PaymentStatus.UNPAID,
+        db_index=True,
+        help_text="UNPAID / PARTIAL / PAID. Recalculated from payments, never accepted from the client.",
+    )
+    paid_amount = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        default=ZERO,
+        help_text="Sum of payments received against this invoice. Server-computed only.",
+    )
+    balance_due = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        default=ZERO,
+        help_text="grand_total − paid_amount. Server-computed only.",
     )
     issued_at = models.DateTimeField(null=True, blank=True)
     cancelled_at = models.DateTimeField(null=True, blank=True)
@@ -176,6 +211,8 @@ class Invoice(TenantModel):
             models.Index(fields=["business", "invoice_date"]),
             models.Index(fields=["business", "status"]),
             models.Index(fields=["business", "party"]),
+            # 3.1: receivables queries filter on business + payment_status.
+            models.Index(fields=["business", "payment_status"]),
         ]
         constraints = [
             # Conditional so any number of DRAFTs (blank number) may coexist.
@@ -239,6 +276,14 @@ class Invoice(TenantModel):
             models.CheckConstraint(
                 condition=models.Q(total_discount__gte=0),
                 name="invoice_total_discount_not_negative",
+            ),
+            # Payment fields (3.1): paid_amount and balance_due are never negative.
+            models.CheckConstraint(
+                condition=models.Q(paid_amount__gte=0), name="invoice_paid_amount_not_negative"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(balance_due__gte=0),
+                name="invoice_balance_due_not_negative",
             ),
         ]
 

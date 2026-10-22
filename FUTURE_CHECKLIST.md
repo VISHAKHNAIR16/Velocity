@@ -483,3 +483,34 @@ things that will bite later if they are not recorded.
 - [ ] **The engine check is a deployment tool, not a test.** `python manage.py check_pdf_engine` is the
       one command that answers "why is the PDF button doing nothing". It exits 1 when Pango is missing
       and 2 when the rupee glyph is unavailable, so a deploy script can gate on it.
+
+---
+
+## 10. Purchases (2.2) — removed, restorable
+
+The module was built, then **removed in full on 2026-10-12**: not needed in this
+project at the time. Everything here is what it would take to bring it back.
+
+- [x] **The database tables were left in place on purpose.** `purchases_purchase`
+      and `purchases_purchaseitem` still exist, holding 2 rows. Django ignores
+      tables no app claims. Keeping them means a restore is `git revert` plus
+      two migrations, with **no data loss** — which matters after this project
+      has already lost `Docs/` to a delete and a database to a reset.
+- [x] **The reusable parts were kept outside the module, so a restore is smaller
+      than it looks:** `Item.purchase_price`, the `PURCHASE*` movement types,
+      `SourceType.PURCHASE`, and `_stock_lines_for_document`.
+- [ ] **To restore:** revert the removal commit, then re-register
+      `apps.purchases` in `INSTALLED_APPS` and `config/urls.py`, and re-add the
+      CI concurrency line. The three migrations are still in git history and
+      would re-apply cleanly — but check whether `0003`'s corrected lifecycle
+      constraints are still wanted, or whether the model has moved on since.
+- [ ] ⚠️ **`PURCHASE_RETURN` is a hard dependency for 2.4.** The enum value is
+      retained but nothing writes it. Debit notes that represent a purchase
+      return will need `apps/purchases` back, or a home of their own.
+- [ ] **The principle is the durable part, not the module.** A supplier's bill is
+      transcribed, so the typed figures are authoritative and the calculator is a
+      comparator that never overwrites them; both versions are stored and the gap
+      is surfaced. The same rule should govern any future document carrying
+      typed money. `compare_entered_vs_computed` lived in
+      `apps/purchases/services/divergence.py` with 16 pure tests — if that file
+      is ever wanted back on its own, it has no dependency on the module.

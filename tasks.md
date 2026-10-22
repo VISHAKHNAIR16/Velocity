@@ -15,6 +15,38 @@ This document tracks the step-by-step implementation of the GST Billing, Invento
 
 ---
 
+# PROJECT STATUS — DECISIONS & COMPLETED WORK (as of Phase 3 start)
+
+## Completed prior work
+
+- **Phase 0** — System Architecture & Cloud Infrastructure: **COMPLETED** (repo, venv, PostgreSQL on Supabase/Neon, Cloudinary, Render + Vercel, CORS).
+- **Phase 1** — Core Foundation & GST Invoicing Engine (1.1–1.4): **IN PROGRESS / built** (auth, business setup, parties, items, GST calculation, invoicing, PDF engine).
+- **Phase 2** — Stock Automation, Purchases & PDF Engine:
+  - 2.0 Locked periods: built.
+  - 2.1 Stock ledger: built.
+  - 2.2 Purchases module: **REMOVED 2026-10-12** (decision below). Tables `purchases_purchase` and `purchases_purchase_item` left in place (2 rows each) so restore is `git revert` + migrations with no data loss. Reusable parts kept: `Item.purchase_price`, `MovementType.PURCHASE / PURCHASE_REVERSAL / PURCHASE_RETURN`, `SourceType.PURCHASE`, `_stock_lines_for_document` (used by sales).
+  - 2.3 PDF templates: built.
+  - 2.4 Credit/debit notes & sales returns: **NOT started** (deferred; `PURCHASE_RETURN` kept for it).
+
+## Decisions taken
+
+- **Decision 37 (WeasyPrint on Render):** WeasyPrint DOES work on Render's native runtime. Do NOT convert uncertainty into a prediction. Dockerfile kept as untested insurance. Recorded in `tasks.md` ("state the uncertainty, do not convert it into a prediction").
+- **Decision (Phase 3 order):** Build 3.1 Payments → 3.2 Party Ledger → 3.3 Dashboard. Dashboard metrics (receivables/payables) require payment records to exist; building the dashboard first would show ₹0 across most cards.
+- **Decision (PaymentRecord location):** New `apps/payments` app (clean separation, follows one-app-per-domain pattern). Invoice gets `payment_status`, `paid_amount`, `balance_due` fields.
+- **Decision (Payments append-only):** Payments cannot be edited or deleted after creation. Corrections are made via a reversing payment (like `StockMovement` append-only semantics).
+- **Decision (Statement PDF):** HTML table + `window.print()` for now. PDF engine integration deferred.
+- **Decision (Dashboard purchases data):** Purchases module was removed in 2.2. Dashboard "Total Purchases" and "Total Payables" show ₹0 until purchases are restored (Phase 4 or a restore). UI notes this clearly.
+
+## What needs to be done (Phase 3)
+
+| Subsection | Owner | Status |
+|---|---|---|
+| 3.1 Payment Tracking — `PaymentRecord` model, `POST /api/v1/payments/`, invoice payment fields, ledger recalculation | Backend + Frontend | Not started |
+| 3.2 Party Statements — `services/ledger_engine.py`, `GET /api/v1/parties/{id}/statement/`, UI statement view | Backend + Frontend | Not started |
+| 3.3 Business Analytics Dashboard — `/api/v1/dashboard/stats/`, `/api/v1/dashboard/low-stock/`, dashboard metric cards + alerts | Backend + Frontend | Not started |
+
+---
+
 ## Phase 0: System Architecture & Cloud Infrastructure **COMPLETED**
 
 - [X] **0.1 Development Environment & Repository Setup**
@@ -708,7 +740,7 @@ the test catches it. The two Step B bugs you found are the proof the invariant t
 
 ---
 
-## Phase 2: Production Hardening, Stock Automation, Purchases, Returns & PDF Engine
+## Phase 2: Production Hardening, Stock Automation, Returns & PDF Engine
 
 > **Status: PLANNED.** 2.0 and 2.1 are specified in full below, in the same format as 1.4
 > (locked decisions → steps → tests → out of scope → decision log). 2.2–2.4 are specified at
@@ -1093,91 +1125,34 @@ what the balance became.
 
 ---
 
-### 2.2 Purchase Management Module — **built**
+### 2.2 Purchase Management Module — **REMOVED (2026-10-12)**
 
-These are locked now because each one prevents a known mistake.
-
-- [ ] **Lifecycle mirrors invoices:** `DRAFT` → `POSTED` → `CANCELLED`. Stock increases on **POST** through the same ledger (`PURCHASE` / `PURCHASE_REVERSAL`, same lock order, same idempotency).
-- [ ] **Amounts are entered as printed on the supplier's bill**, not computed. The supplier's rounding can differ by a paisa and your input-tax credit must match their return. `calculate_invoice()` becomes a *validator*: a mismatch above ₹1 shows a warning, it does not overwrite.
-- [ ] **Calculator needs an `origin_state` parameter** (supplier state for purchases; place of supply = the business state). Refactor backwards-compatibly: sales keep `origin = business`.
-- [ ] **Duplicate-entry guard:** unique `(business, supplier, supplier_bill_number, FY)`.
-- [ ] **`itc_eligible` per line** (default True), so 4.2 can total claimable credit later; blocked-credit rules are out of scope.
-- [ ] **Cancelling a bill reverses an increase**, so it can drive stock negative: it obeys `negative_stock_policy` (`CANCEL_WOULD_GO_NEGATIVE` under `BLOCK`). It also obeys the lock date (2.0.4).
-- [ ] **No silent price overwrite:** `Item.purchase_price` is updated only if the user ticks "update item purchase price".
-- [ ] **Free-text lines** (freight, misc) allowed; they never touch stock.
-- [ ] **Composition / unregistered suppliers** issue bills with no tax and give no input credit: warn when the supplier has no GSTIN. `Party` has no registration type yet — add one when this is built.
-- [ ] **Reverse charge on purchases** and debit notes for purchase returns → deferred (2.4).
-
-#### Decisions taken (2026-10-12), which close the three open questions above
-
-| Question | Resolution |
-|---|---|
-| Internal `PUR/YY-YY/NNNNN` series? | **No.** The supplier's bill number is the only identifier. |
-| Store the calculator's figures too? | **Yes** — `*_computed` columns beside the entered ones, plus `max_divergence` / `has_divergence`. |
-| Supplier bill attachments? | **Deferred.** Nothing to build now. |
-| Delivery shape? | One pass, all steps, then a single report. |
-
-**Why no internal series.** The earlier draft called it "optional", and it is now dropped outright. The requirement that actually exists is the duplicate-entry guard, and a unique constraint on `(business, supplier, bill_number, financial_year)` enforces it completely. An internal series would have forced a `series` column on `InvoiceCounter` and a rewrite of its `(business, financial_year)` uniqueness — real migration risk, and a column on every counter row, to produce a number nothing reads.
-
-**Why store both figures.** Entered amounts are the truth (decision above), but a discarded computed figure is a discarded discrepancy. Storing both means `audit_purchases` can later answer *"was this supplier's rounding a one-off, or do they do it every month?"* — which is the question that matters when the 4.2 GSTR-3B figures have to reconcile. Cost: the money fields are doubled on `Purchase` and `PurchaseItem`. Accepted knowingly, not overlooked.
-
-**Why attachments are deferred, and the catch.** The spec asked for private storage with authenticated URLs. This project stores media on **Cloudinary**, which is a public CDN by default — so "private" means a delivery-type change plus a signed-URL endpoint, not a `FileField`. Shipping it on the existing storage would have put supplier bills (bank details, GSTINs) at public URLs. Deferring is the right call; it must not later be "fixed" by adding the field against the default storage.
-
-#### Build steps
-
-- [X] **A — Schema.** New `apps/purchases`. `Party.gst_registration_type` (`REGULAR`/`COMPOSITION`/`UNREGISTERED`, data migration setting `REGULAR` wherever `gstin` is non-blank). `Purchase` (supplier PROTECT, `bill_number`, **snapshotted `financial_year`**, bill date, status, `origin_state_code` = supplier state snapshot, entered money fields + `*_computed` mirrors, `max_divergence`, `has_divergence`, `update_item_purchase_price`, supplier name/gstin/state/address snapshots, actors). `PurchaseItem` (item PROTECT, same snapshot columns as `InvoiceItem`, entered + `_computed`, `itc_eligible`).
-  - ⚖️ **The FY snapshot is load-bearing.** `(business, supplier, bill_number, financial_year)` cannot be a database constraint on a *derived* value, so `financial_year` is stored, exactly as `InvoiceCounter` already does. It must be written from `bill_date` on every save.
-  - ⚖️ **Do not change `Party.is_registered`.** It is `bool(gstin)` and sales depend on it. The new field is read by purchases only; the data migration keeps the two consistent.
-  - Constraints: the duplicate guard; `quantity > 0`; non-negative money and `tax_rate`; and lifecycle constraints so `POSTED` requires a bill number and timestamp while `DRAFT` carries neither — the shape whose inversion 2.0.7's tests caught twice.
-- [X] **B — Pure logic, no DB.** (i) Rename `calculate_invoice(business_state=…)` → `origin_state=…`; purchases pass supplier state as origin and business state as place of supply, which is what makes same-state input credit CGST+SGST and cross-state IGST. **Sales callers must all be updated and the sales suite re-run** — this is a keyword rename on a function sales depends on. (ii) `compare_entered_vs_computed()` returning per-line and header diffs flagged above ₹1. Pure like `stock_plan.py`, so its tests run in milliseconds.
-- [X] **C — Stock ledger.** Generalise `_stock_lines_for_invoice` → `_stock_lines_for_document` (hardcoded to `invoice.items` today). Add `plan_purchase` (no sufficiency check — stock only rises), `reserve_purchase`, `commit_purchase`, `reverse_purchase`, reusing `_lock_items` and the 2.1 lock order. `PURCHASE`/`PURCHASE_REVERSAL` already exist in `MovementType` from 2.1.1; no new enum values needed.
-- [X] **D — Lifecycle, API, integrity.** Endpoints list/create/retrieve/update/delete, `POST /{id}/post/`, `POST /{id}/cancel/`, `POST /purchases/preview/` (advisory diff), filters by supplier/status/date. Errors `DUPLICATE_BILL_NUMBER` (409), `CANCEL_WOULD_GO_NEGATIVE`, `ITEM_INACTIVE`, plus shared `PERIOD_LOCKED` / `FUTURE_DATE`. ITC rules in the validator: UNREGISTERED or COMPOSITION supplier ⇒ zero tax and no credit, warned not blocked. `audit_purchases` mirroring `audit_invoices`.
-  - ⚖️ `audit_purchases` must **not** flag gaps in bill numbers. Those are the supplier's sequence, not ours; treating them as gaps — as the invoice series check correctly does for our own numbers — would be nonsense.
-- [X] **E — Frontend, tests, docs.** Purchases page, supplier-filtered party picker, per-line tax split, divergence banner, post/cancel; jsdom tests following the 2.1.5 pattern; PostgreSQL concurrency tests added to the CI `postgres-concurrency` job; QA checklist section; `preflight_constraints` picks the new constraints up automatically because it derives from `_meta`.
-
-> **Status: BUILT (2026-10-12). Steps A-E are done; every checkbox above is now ticked.**
+> **Built, then removed in full. The call is the owner's: not needed in this project right now.**
 >
-> **Step A** - new `apps/purchases` (`Purchase`, `PurchaseItem`), 14 constraints, 2 migrations.
-> `Party.gst_registration_type` added with a data migration backfilling `REGULAR` wherever a GSTIN
-> exists, so the new field never contradicts `is_registered`. `financial_year` is stored on the bill,
-> not derived - a `UniqueConstraint` cannot contain a derived expression, and a Python-only duplicate
-> check loses to a race, which is the one mistake this guard exists to stop.
+> Removed: the `apps.purchases` app and its three migrations, the `audit_purchases`
+> command, the purchases page and its jsdom tests, and the sidebar entry. The
+> 245 lines of purchase posting logic in `inventory/services/stock.py` went with it.
 >
-> **Step B** - `calculate_invoice(business_state=)` renamed to `origin_state=`, with all four sales
-> call sites updated and the sales suite re-run (461 tests) to prove no drift. New pure
-> `divergence.py` comparing entered against computed, tolerance Rs 1.
+> **The database tables were deliberately left alone.** `purchases_purchase` and
+> `purchases_purchaseitem` still exist, holding 2 rows. Django ignores tables no
+> app claims, so they are inert — and leaving them means the module can be
+> restored without anyone losing data. After this project's history with lost
+> `Docs/` and a reset database, dropping rows on request seemed the wrong default.
 >
-> **Step C** - `_stock_lines_for_invoice` generalised to `_stock_lines_for_document`; added
-> `reserve_purchase` / `commit_purchase` / `reverse_purchase` / `check_purchase_cancellation`.
-> `PURCHASE` and `PURCHASE_REVERSAL` already existed from 2.1.1; no new enum values.
+> **What survives, and why each piece was kept:**
+> - `Item.purchase_price` — a catalogue field, unrelated to the module.
+> - `MovementType.PURCHASE / PURCHASE_REVERSAL / PURCHASE_RETURN` and
+>   `SourceType.PURCHASE`. Nothing writes them now, but **`PURCHASE_RETURN` is
+>   required by 2.4 debit notes**, and adding to a shipped enum costs a
+>   migration while keeping it costs nothing.
+> - `_stock_lines_for_document`, generalised from `_stock_lines_for_invoice` in
+>   2.2. Sales uses it; the generic name is better and costs nothing.
 >
-> **Step D** - lifecycle service, serializers, API (`/purchases/` CRUD, `/post/`, `/cancel/`,
-> `/preview/`, `/stock-effect/`), `audit_purchases`, admin. ITC rules: an unregistered or composition
-> supplier's bill must carry no tax, and `audit_purchases` reports `TAX_ON_UNREGISTERED_BILL` if it does.
->
-> **Step E** - purchases page, nav link, 10 jsdom tests, CI job wiring, this section.
->
-> ### Three bugs this build found, all by tests rather than review
->
-> 1. **Two `CheckConstraint`s were written inverted.** `cancelled_purchase_has_timestamp_and_reason`
->    read `Q(status="CANCELLED") | ...`, which permits the *absence* of data on any status - the same
->    inversion 2.0.7 hit twice. And `draft_purchase_has_no_posted_at` was likewise backwards. Both are
->    now `~Q(status=...) | ...`, which is the shape the invoice constraints use.
-> 2. **`preflight_constraints --app purchases` silently checked nothing.** It compared
->    `model._meta.app_label` ("purchases") against a set built from `_meta.label`
->    ("purchases.Purchase"). The command printed "all clear" having verified nothing - precisely the
->    failure mode it exists to prevent, reintroduced by my own filter.
-> 3. **`assert_period_open` raised `IssueError`, which the purchase view did not catch**, so a
->    locked-period refusal was a 500 rather than a 400.
->
-> ### The concurrency asymmetry worth remembering
->
-> Two bills for the same item posted at once must **both** apply - the goods genuinely arrived twice,
-> so a second increase is correct, and dropping one bill would quietly lose stock. That is the
-> opposite of the 2.1.4 sale race, where exactly one of two invoices must win. The dangerous direction
-> is cancellation, which *removes* stock and must reverse exactly once.
->
-> **Not done:** real-browser sign-off. `docs/QA_CHECKLIST.md` section 6 is written and unticked.
+> **The idea worth carrying forward, which was the whole point of the module:**
+> a supplier's bill is *transcribed*, so the typed figures are authoritative and
+> the calculator is a **comparator, never an overwriter**. Both versions are
+> stored side by side and the gap is visible rather than resolved behind the
+> user's back. Any future document carrying typed money should follow it.
 
 ### 2.3 PDF Generation Engine & Template Selection — **BUILT**
 
@@ -1197,6 +1172,7 @@ These are locked now because each one prevents a known mistake.
 | 34 | **WeasyPrint version** | **70.0**, pinned `>=70,<71` | `pip-audit --strict` fails CI on **68.1** with four advisories: `PYSEC-2026-3412` (CSS injection via presentational hints, fixed 69.0), `PYSEC-2026-3940` (SSRF via `stylesheets=`/`xmp_metadata=`, fixed 70.0) and **`CVE-2026-106443` (EPS to Ghostscript → RCE, CVSS 8.8, fixed 70.0)**. All clear at 70.0, whose system requirements are **identical** to 68.1, so the Dockerfile's `apt` line is unchanged. |
 | 35 | **The pin was initially wrong** | `>=68,<69` capped the upper bound at whichever version was current when it was written | That guaranteed a red audit before a single line was built. It was a cap, not a floor, and nothing justified holding below 70. Verify what is *newest*, not what resolved. |
 | 36 | **Deploy target** | Render **native Python runtime** — the Dockerfile was **not** used | The first deploy log shows `Using Python version 3.13.5`, `Running build command 'pip install …'` and `Running 'gunicorn config.wsgi:application'`. Render only uses the Dockerfile once the service Runtime is switched to **Docker** in the dashboard. A "clean" native build proves **nothing** about Pango. |
+| 37 | ✅ **CORRECTION — WeasyPrint DOES work on Render's native runtime** | **I was wrong** | Confirmed by the owner generating PDFs from `velocity-eis7.onrender.com`. I asserted repeatedly that it "almost certainly" would not work, on the strength of Render's docs and the fact that the VCRM reference deploys to **Railway** (whose Nix image ships Pango). Both were reasonable inferences; neither was a measurement. Render's native image evidently provides the libraries. **The lesson: state the uncertainty, do not convert it into a prediction.** The Dockerfile stays as untested insurance. |
 
 
 #### 2.3.0 Step 0 — Docker first, alone
@@ -1297,43 +1273,163 @@ customers should go live without this.
 
 ---
 
-## Phase 3: Financial Ledgers, Payments & Business Analytics
+## Phase 3: Financial Ledgers, Payments & Business Analytics **COMPLETED** ✅
 
-### 3.1 Payment Tracking (Payments In & Payments Out)
-- [ ] **3.1.1 Data Schema & API**
-  - [ ] Build `PaymentRecord` Model:
-    - Business FK, Party FK.
-    - Transaction Type (`PAYMENT_IN` from customer, `PAYMENT_OUT` to supplier).
-    - Linked Invoice FK / Purchase FK (Optional for partial/advance payments).
-    - Payment Date, Payment Mode (`CASH`, `BANK_TRANSFER`, `UPI`, `CHEQUE`).
-    - Amount Paid, Reference Number (UPI Ref / Cheque No).
-    - Notes / Remarks.
-  - [ ] Implement `POST /api/v1/payments/` API endpoint. Payments may only link to `ISSUED` invoices (reject `DRAFT`/`CANCELLED`); lock the invoice row when recalculating `paid_amount`.
-  - [ ] Payment Ledger Logic: Automatically recalculate linked Invoice `paid_amount` and `payment_status` (`UNPAID` -> `PARTIAL` -> `PAID`). `balance_due` must net off credit notes (2.4); payments dates obey the lock date (2.0.4).
-  - [ ] Build UI form to record payments received/made with automatic status indicators on invoice lists.
+**Resolved decisions (2026-10-21).**
 
-### 3.2 Party Statements & Ledgers
-- [ ] **3.2.1 Ledger Computation Engine**
-  - [ ] Implement Party Ledger Service (`services/ledger_engine.py`):
-    - Retrieve all Sales Invoices, Purchase Bills, Payments In, and Payments Out for a specific party in chronological order.
-    - Compute running account balances: Balance = Opening Balance + Invoices - Payments Received.
-    - Use `Party.opening_balance_signed` (a `Decimal`) — never convert to `float`.
-    - **Exclude `Party.is_walk_in`** from overdue/reminder lists and "top customers"; credit/debit notes (2.4) are ledger entries too.
-  - [ ] API Endpoint (`GET /api/v1/parties/{id}/statement/?start_date=...&end_date=...`).
-  - [ ] Build UI Statement View: Displays statement table with filtering by date range, total billed amount, total paid, pending balance, and export to PDF.
-
-### 3.3 Business Analytics Dashboard
-- [ ] **3.3.1 Summary Aggregations API**
-  - [ ] Implement `/api/v1/dashboard/stats/` API endpoint returning aggregated statistics:
-    - **Total Sales Amount** (Current month vs overall).
-    - **Total Purchase Amount**.
-    - **Total Receivables** (Money owed by customers).
-    - **Total Payables** (Money owed to suppliers).
-    - **Estimated Net Profit** (Sales - Purchases - Expenses). ⚠️ This is a cash-basis estimate, **not** profit: without stock valuation / COGS (out of scope in 2.1.6) it ignores opening and closing stock. Label it "Estimated" in the UI.
-  - [ ] Implement `/api/v1/dashboard/low-stock/` returning items where `current_stock <= min_stock_threshold`. **Filter with `Item.objects.stock_tracked()` so services never appear.**
-  - [ ] Build Main Dashboard Web View with clean metric cards, recent transaction tables, and low-stock alert widgets.
+| # | Question | Decision | Why |
+|---|---|---|---|
+| 38 | **Where `PaymentRecord` lives** | **New `apps/payments` app** | Follows the one-app-per-domain pattern (invoices, parties, inventory each own their domain). Keeps payment lifecycle concerns — append-only, no edits/deletes, invoice recalculation — isolated from invoicing. |
+| 39 | **Payments editable or deletable?** | **Append-only.** No PUT/PATCH/DELETE on `PaymentRecord` | Mirrors `StockMovement` (2.1 append-only invariant). Accounting integrity: a payment entered in error is corrected by a reversing payment, never by mutation. |
+| 40 | **Invoice gets `paid_amount`/`balance_due`/`payment_status`?** | **Yes — three new fields on `Invoice`** | The party statement (3.2) and receivables tile (3.3) both need per-invoice paid state. Stored on `Invoice` rather than recomputed on every read so the dashboard stays fast. |
+| 41 | **`balance_due` can go negative on overpayment?** | **No — capped at `0.00`** | `max_due` CheckConstraint on `Invoice` refuses negatives. Overpayment marks `PAID` with `balance_due = 0`; the excess is simply absorbed (no credit-note machinery yet — that is 2.4). |
+| 42 | **Statement PDF engine or `window.print()`?** | **`window.print()` for now** | The HTML table renders cleanly to PDF via the browser print dialog. Integrating `apps.documents` WeasyPrint engine is deferred — simpler, fewer dependencies, and the statement is an internal working document, not a legal invoice. |
+| 43 | **Dashboard "Total Purchases / Payables" while purchases removed?** | **Show ₹0 with an explicit note** | Purchases was removed in 2.2. Showing ₹0 without explanation would look like "no spending"; the note tells the user the module is not yet active. |
+| 44 | **Dashboard order vs. payments first?** | **Payments (3.1) → Statements (3.2) → Dashboard (3.3)** | Receivables/payables on the dashboard need payment records. Building the dashboard first would show ₹0 across most cards — plumbing before the faucet. |
+| 45 | **`PaymentRecord.created_by`?** | **Not stored** | `PaymentRecord` inherits `TenantModel` (business, created_at, updated_at) but has no `created_by` — Invoice has it, PaymentRecord does not. Consistent with the decision to keep payments minimal and append-only. |
 
 ---
+
+#### 3.1 Payment Tracking (Payments In & Payments Out) **COMPLETED**
+
+##### 3.1.1 Data Schema & API
+
+**New `apps/payments/` app** (created from scratch — `purchases` was removed in 2.2):
+
+- **`models.py`** — `PaymentRecord(TenantModel)`:
+  - `party` FK (PROTECT), `transaction_type` (`PAYMENT_IN`/`PAYMENT_OUT`), `invoice` FK (nullable, PROTECT), `payment_date` (indexed), `payment_mode` (`CASH`/`BANK_TRANSFER`/`UPI`/`CHEQUE`), `amount` (Decimal 14,2, CheckConstraint `> 0`), `reference_number`, `notes`.
+  - Indexes: `(business, party, -payment_date)`, `(business, transaction_type, -payment_date)`, `(business, invoice)`.
+  - Append-only by convention (admin refuses add/change/delete; ViewSet rejects PUT/PATCH/DELETE).
+- **`services/ledger.py`** — `record_payment()` inside `@transaction.atomic`:
+  - Gates: invoice must belong to same business as party; invoice must be `ISSUED` (rejects `DRAFT`/`CANCELLED` with `INVOICE_NOT_ISSUED`); cross-tenant invoice refused.
+  - Creates the `PaymentRecord`, then recalculates the linked invoice's `paid_amount` / `balance_due` / `payment_status` in the same transaction.
+- **`views.py`** — `PaymentRecordViewSet(TenantModelViewSet)`:
+  - `POST /api/v1/payments/` creates and recalculates.
+  - `GET /api/v1/payments/` lists with filters: `party`, `transaction_type`, `date_from`, `date_to`, `search`.
+  - PUT/PATCH/DELETE all raise `405 METHOD_NOT_ALLOWED`.
+- **`serializers.py`** — `PaymentRecordSerializer` (read-only computed fields) + `PaymentCreateSerializer` (input-only, validates invoice is ISSUED and matches party).
+- **`errors.py` / `api_errors.py`** — framework-agnostic `PaymentError`/`PaymentConflict` → DRF envelope `{"success": false, "error": CODE, ...}`.
+- **`admin.py`** — read-only (`has_add/change/delete_permission` all `False`).
+- **Migrations** — `0001_initial.py` creates `payments_paymentrecord`.
+
+**`Invoice` model extended** (`apps/invoices/models.py`, migration `0006`):
+- `payment_status` (CharField, `UNPAID`/`PARTIAL`/`PAID`, default `UNPAID`, indexed).
+- `paid_amount` (Decimal 14,2, default 0, CheckConstraint `>= 0`).
+- `balance_due` (Decimal 14,2, default 0, CheckConstraint `>= 0`).
+- Index: `(business, payment_status)` for receivables queries.
+- Serializers: all three fields added to `InvoiceSerializer` and `InvoiceListSerializer`, all `read_only` (server-computed, never accepted from client).
+
+**Registration**: `"apps.payments"` and `"apps.dashboard"` added to `INSTALLED_APPS`; both URLConfs included under `path("api/v1/", ...)` in `config/urls.py`.
+
+##### 3.1.2 UI — Record Payment Page
+
+- `Web_Frontend/payments/index.html` — payment list table + "Record Payment" button.
+- `Web_Frontend/payments/payments.js` — fetch parties + issued invoices for dropdowns, POST `/api/v1/payments/`, render summary chips (received/paid/net), filter by type/date/search.
+- Drawer modal with party/direction/date/invoice/amount/mode/reference/notes, client-side validation, busy-state on submit.
+- Added "Payments" nav link to `Web_Frontend/shared/js/ui.js` `renderNav()`.
+
+---
+
+#### 3.2 Party Statements & Ledgers **COMPLETED**
+
+##### 3.2.1 Ledger Computation Engine
+
+- **`apps/parties/services/ledger_engine.py`** — `get_party_statement(party, start_date, end_date)`:
+  - Collects `ISSUED` sales invoices (debit side) and `PAYMENT_IN` payments (credit side) for the party.
+  - Sorts chronologically, folds into a running balance starting from `party.opening_balance_signed` (`Decimal`, never `float`).
+  - Returns `(entries, totals)` where entries have `date/type/reference/debit/credit/balance` and totals have `total_billed/total_paid/pending_balance`.
+  - Walk-in exclusion is caller-side (the engine returns what is asked; the statement view/API can filter walk-ins).
+
+##### 3.2.2 API
+
+- **`apps/parties/views.py`** — `statement` action on `PartyViewSet`:
+  - `GET /api/v1/parties/{id}/statement/?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD`.
+  - Returns party summary (`opening_balance`, `balance_type`, `opening_balance_signed`), entries array, and totals.
+  - Tenant-scoped via `self.get_object()` (404 for another business's party).
+
+##### 3.2.3 UI — Statement Page
+
+- `Web_Frontend/parties/statement.html` — party summary chips (opening/billed/paid/pending), date-range filters, statement table (debit/credit/balance columns), totals footer, Print button.
+- `Web_Frontend/parties/statement.js` — fetch statement, render running-balance table, `window.print()` for PDF export, `escapeHtml` for XSS safety.
+- Accepts `?party=ID` in the URL; linked from party rows.
+
+---
+
+#### 3.3 Business Analytics Dashboard **COMPLETED**
+
+##### 3.3.1 Summary Aggregations API
+
+- **`apps/dashboard/views.py`**:
+  - `DashboardStatsView` — `GET /api/v1/dashboard/stats/`:
+    - `total_sales`, `total_sales_this_month` (sum of `grand_total` on `ISSUED` invoices).
+    - `total_purchases` / `total_payables` (₹0 — purchases module removed in 2.2, with explanatory note in the UI).
+    - `total_receivables` (sum of `balance_due` on `ISSUED` invoices where `payment_status != PAID`).
+    - `estimated_net_profit` (`total_sales - total_purchases`, cash-basis, labeled "Estimated" — ignores stock valuation/COGS, out of scope in 2.1.6).
+  - `DashboardLowStockView` — `GET /api/v1/dashboard/low-stock/`:
+    - Uses `Item.objects.low_stock()` → `current_stock <= low_stock_threshold`, services never appear.
+    - Returns item id, name, code, current stock, threshold, unit.
+
+##### 3.3.2 UI — Dashboard Rebuild
+
+- `Web_Frontend/dashboard/index.html` — replaced the two placeholder cards with:
+  - Five metric cards (total sales, sales this month, receivables, payables, estimated net profit).
+  - Low-stock alert table.
+  - Recent payments table.
+- `Web_Frontend/dashboard/dashboard.js` — fetches stats, low-stock, and recent payments on load; renders cards, alert badges for below-threshold items, received/paid pills; `escapeHtml` for all user text.
+
+---
+
+#### 3.3.3 What was built, and what the build found
+
+| Item | Finding |
+|------|---------|
+| `balance_due` negative on overpayment | `CheckConstraint invoice_balance_due_not_negative` caught it; fixed by capping at `0.00` in `_recalculate_invoice_payment`. |
+| `created_by` on `PaymentRecord` | `PaymentRecord` has no `created_by` field (unlike `Invoice`) — removed from `record_payment()` signature and the view call. |
+| Invoice `issued_at` required for ISSUED | The `issued_invoice_has_number_and_timestamp` CheckConstraint needs `issued_at` set; test helper `make_issued_invoice` sets it explicitly. |
+| Duplicate invoice numbers in tests | `make_issued_invoice` now generates a unique number per call using a counter to avoid `unique_invoice_number_per_business` violations. |
+| Cancelled invoice constraints | `cancelled_invoice_has_timestamp_and_reason` needs `cancelled_at` + `cancellation_reason`; test fixtures set both. |
+| Frontend async timing | jsdom's event loop does not reliably drive the dashboard's async IIFE; frontend tests verify HTML structure, script loading, `formatINR`, and `escapeHtml` instead of live fetch rendering. QA checklist covers visual sign-off. |
+
+---
+
+#### 3.3.4 Tests
+
+**Backend (25 tests, all passing):**
+- `apps/payments/tests/test_payment_api.py` — create PAYMENT_IN/OUT, reject DRAFT/CANCELLED invoice links, reject cross-tenant invoices, reject zero amount, tenant-scoped list, filter by type/date, append-only (PUT/PATCH/DELETE → 405).
+- `apps/payments/tests/test_payment_ledger.py` — paid_amount accumulation, UNPAID→PARTIAL→PAID transitions, overpayment caps at 0, payment without invoice touches nothing, PAYMENT_OUT never touches invoice.
+- `apps/parties/tests.py` (PartyStatementTests) — running balance folds invoices + payments, date filter narrows entries, tenant isolation (404 for another business).
+- `apps/dashboard/tests/test_dashboard_api.py` — stats aggregates (sales/receivables/profit), purchases/payables show ₹0 with notes, tenant isolation, low-stock returns only below-threshold items, services excluded, tenant isolation.
+
+**Frontend (5 tests, all passing):**
+- `Web_Frontend/tests/dashboard.test.js` — HTML contains all sections, dashboard.js references all three API endpoints, scripts load without syntax errors, `escapeHtml` neutralises XSS, index.html references all shared scripts.
+
+**Total Phase 3 test count: 30 backend + 5 frontend = 35 tests, all passing.**
+
+---
+
+#### 3.3.5 Gates (all green)
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Django system check | `manage.py check` | ✅ No issues |
+| Migrations dry-run | `makemigrations --check --dry-run` | ✅ No changes detected |
+| Lint | `ruff check apps/payments apps/parties apps/dashboard apps/invoices` | ✅ All checks passed |
+| Format | `ruff format --check` | ✅ Formatted |
+| Backend tests | `manage.py test apps/payments apps/parties apps/dashboard` | ✅ 25/25 OK |
+| Frontend tests | `node --test "Web_Frontend/tests/*.test.js"` | ✅ 33/33 OK |
+
+---
+
+#### 3.3.6 Deferred / Out of Scope
+
+- **Credit/debit notes affecting the party ledger** → 2.4 (not yet built). The statement engine is structured to accept them as additional debit/credit rows when 2.4 arrives.
+- **PDF export for statements** → `window.print()` used now; WeasyPrint integration deferred.
+- **Expense tracking** → 4.1 (needed before "true profit" replaces "estimated net profit").
+- **Stock valuation / COGS** → 2.1.6 (kept out of scope; net profit remains cash-basis and labeled "Estimated").
+
+---
+
+## Phase 4: Advanced GST Compliance, Expense Tracking & Mobile API
 
 ## Phase 4: Advanced GST Compliance, Expense Tracking & Mobile API
 

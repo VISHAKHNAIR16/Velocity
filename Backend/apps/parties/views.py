@@ -9,6 +9,7 @@ from apps.core.viewsets import TenantModelViewSet
 
 from .models import Party
 from .serializers import PartyListSerializer, PartySerializer
+from .services.ledger_engine import get_party_statement
 
 #: Message used wherever the walk-in refuses an edit (decision 21). One constant
 #: so the API, the tests and the frontend hint can never disagree.
@@ -200,3 +201,51 @@ class PartyViewSet(TenantModelViewSet):
             for p in queryset
         ]
         return Response(data)
+
+    @action(detail=True, methods=["get"], url_path="statement")
+    def statement(self, request, pk=None):
+        """
+        GET /api/v1/parties/{id}/statement/?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
+
+        Running-balance ledger for one party: sales invoices (debit) and
+        payments received (credit), folded into a running balance that starts
+        from `party.opening_balance_signed`.
+
+        Query params:
+            start_date  Optional, inclusive (YYYY-MM-DD).
+            end_date    Optional, inclusive (YYYY-MM-DD).
+        """
+        party = self.get_object()
+        start_date = request.query_params.get("start_date")
+        end_date = request.query_params.get("end_date")
+
+        entries, totals = get_party_statement(party, start_date, end_date)
+
+        return Response({
+            "party": {
+                "id": party.id,
+                "name": party.name,
+                "party_type": party.party_type,
+                "opening_balance": str(party.opening_balance),
+                "balance_type": party.balance_type,
+                "opening_balance_signed": str(party.opening_balance_signed),
+            },
+            "start_date": start_date,
+            "end_date": end_date,
+            "entries": [
+                {
+                    "date": entry["date"].isoformat(),
+                    "type": entry["type"],
+                    "reference": entry["reference"],
+                    "debit": str(entry["debit"]),
+                    "credit": str(entry["credit"]),
+                    "balance": str(entry["balance"]),
+                }
+                for entry in entries
+            ],
+            "totals": {
+                "total_billed": str(totals["total_billed"]),
+                "total_paid": str(totals["total_paid"]),
+                "pending_balance": str(totals["pending_balance"]),
+            },
+        })
