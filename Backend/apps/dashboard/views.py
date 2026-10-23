@@ -27,6 +27,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.services import get_business
+from apps.core.money import q2
 from apps.core.viewsets import TenantQuerysetMixin
 from apps.inventory.models import Item
 from apps.invoices.models import Invoice
@@ -63,18 +64,25 @@ class DashboardStatsView(_DashboardMixin, APIView):
             status=Invoice.Status.ISSUED,
         )
 
-        total_sales = invoices.aggregate(s=Sum("grand_total", output_field=DecimalField()))[
-            "s"
-        ] or Decimal("0")
+        total_sales = q2(
+            invoices.aggregate(s=Sum("grand_total", output_field=DecimalField()))["s"]
+            or Decimal("0")
+        )
 
-        total_sales_month = invoices.filter(invoice_date__gte=month_start).aggregate(
-            s=Sum("grand_total", output_field=DecimalField())
-        )["s"] or Decimal("0")
+        total_sales_month = q2(
+            invoices.filter(invoice_date__gte=month_start).aggregate(
+                s=Sum("grand_total", output_field=DecimalField())
+            )["s"]
+            or Decimal("0")
+        )
 
         # Receivables: balance_due on invoices that are not fully paid.
-        total_receivables = invoices.filter(
-            ~Q(payment_status=Invoice.PaymentStatus.PAID)
-        ).aggregate(s=Sum("balance_due", output_field=DecimalField()))["s"] or Decimal("0")
+        total_receivables = q2(
+            invoices.filter(
+                ~Q(payment_status=Invoice.PaymentStatus.PAID)
+            ).aggregate(s=Sum("balance_due", output_field=DecimalField()))["s"]
+            or Decimal("0")
+        )
 
         # Purchases module removed in 2.2 — placeholder until restored.
         total_purchases = Decimal("0")

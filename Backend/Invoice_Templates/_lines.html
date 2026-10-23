@@ -26,15 +26,19 @@ partials is what makes that test passable rather than accidental.
           {% if line.is_service %}<div class="muted small">Service</div>{% endif %}
         </td>
         <td class="muted">{{ line.hsn|default:"—" }}</td>
-        {# Quantity is printed with its own precision rather than intcomma'd:
+        <!-- Quantity is printed with its own precision rather than intcomma'd:
             a decimal like 2.500 must not be rounded into an integer by a
-            thousands separator formatter. #}
+            thousands separator formatter. -->
         <td class="num">{{ line.quantity|floatformat:3 }} {{ line.unit }}</td>
         <td class="num">{{ line.unit_price|floatformat:2 }}</td>
         <td class="num">{{ line.taxable_value|floatformat:2 }}</td>
         <td class="num">
-          {% if supply.tax_label == "IGST" %}{{ line.igst|floatformat:2 }}
-          {% else %}{{ line.sgst|floatformat:2 }}{% endif %}
+          {% if supply.tax_label == "IGST" %}
+            {{ line.igst|floatformat:2 }}
+          {% else %}
+            <div>CGST {{ line.cgst|floatformat:2 }}</div>
+            <div>SGST {{ line.sgst|floatformat:2 }}</div>
+          {% endif %}
         </td>
         <td class="num strong">{{ line.total|floatformat:2 }}</td>
       </tr>

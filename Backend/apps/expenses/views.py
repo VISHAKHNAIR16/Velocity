@@ -11,6 +11,8 @@ Endpoints:
 - GET    /api/v1/expenses/categories/ List expense categories
 """
 
+from decimal import Decimal
+
 from django.db.models import Sum
 from django.db.models.functions import TruncMonth
 from rest_framework import filters, status
@@ -18,6 +20,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from apps.accounts.services import get_business
+from apps.core.money import q2
 from apps.core.viewsets import TenantModelViewSet
 
 from .api_errors import translate
@@ -81,8 +84,8 @@ class ExpenseViewSet(TenantModelViewSet):
             {
                 "by_category": list(by_category),
                 "by_month": list(by_month),
-                "grand_total": str(grand_total["total"] or 0),
-                "grand_tax": str(grand_total["tax"] or 0),
+                "grand_total": str(q2(grand_total["total"] or Decimal("0"))),
+                "grand_tax": str(q2(grand_total["tax"] or Decimal("0"))),
             }
         )
 
