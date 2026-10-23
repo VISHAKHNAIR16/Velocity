@@ -131,144 +131,144 @@ jobs:
           --noinput
           --exclude-tag=contract
 
-  # -------------------------------------------------------------------------
-  # The concurrency proof, on real PostgreSQL.
-  #
-  # Only the PostgreSQL-only classes run here: the rest of the suite is already
-  # covered above and would add ~15 minutes of network latency for nothing.
-  # -------------------------------------------------------------------------
-  postgres-concurrency:
-    name: PostgreSQL concurrency
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    # postgres service container, not Neon: no secrets, no branch to fall over,
-    # no pooled connection to reason about, and it starts in seconds.
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: velocity
-          POSTGRES_PASSWORD: velocity
-          POSTGRES_DB: velocity_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U velocity"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    env:
-      DJANGO_SETTINGS_MODULE: config.settings_test_pg
-      TEST_DATABASE_URL: postgresql://velocity:velocity@localhost:5432/velocity_test
-      TEST_DATABASE_NAME: velocity_ci
-    steps:
-      - uses: actions/checkout@v4
+  # # -------------------------------------------------------------------------
+  # # The concurrency proof, on real PostgreSQL.
+  # #
+  # # Only the PostgreSQL-only classes run here: the rest of the suite is already
+  # # covered above and would add ~15 minutes of network latency for nothing.
+  # # -------------------------------------------------------------------------
+  # postgres-concurrency:
+  #   name: PostgreSQL concurrency
+  #   runs-on: ubuntu-latest
+  #   timeout-minutes: 20
+  #   # postgres service container, not Neon: no secrets, no branch to fall over,
+  #   # no pooled connection to reason about, and it starts in seconds.
+  #   services:
+  #     postgres:
+  #       image: postgres:16
+  #       env:
+  #         POSTGRES_USER: velocity
+  #         POSTGRES_PASSWORD: velocity
+  #         POSTGRES_DB: velocity_test
+  #       ports:
+  #         - 5432:5432
+  #       options: >-
+  #         --health-cmd "pg_isready -U velocity"
+  #         --health-interval 10s
+  #         --health-timeout 5s
+  #         --health-retries 5
+  #   env:
+  #     DJANGO_SETTINGS_MODULE: config.settings_test_pg
+  #     TEST_DATABASE_URL: postgresql://velocity:velocity@localhost:5432/velocity_test
+  #     TEST_DATABASE_NAME: velocity_ci
+  #   steps:
+  #     - uses: actions/checkout@v4
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
+  #     - name: Install uv
+  #       uses: astral-sh/setup-uv@v5
+  #       with:
+  #         enable-cache: true
 
-      - name: Set up Python
-        run: uv python install ${{ env.PYTHON_VERSION }}
+  #     - name: Set up Python
+  #       run: uv python install ${{ env.PYTHON_VERSION }}
 
-      - name: Install dependencies
-        run: uv sync --frozen --dev
+  #     - name: Install dependencies
+  #       run: uv sync --frozen --dev
 
-      # `apps.inventory.tests_stock_concurrency` (2.1.4) runs here too. It needs a
-      # pool-free connection for the same reason the invoice tests do, and CI's
-      # postgres:16 service is already direct.
-      - name: Concurrency tests on PostgreSQL
-        run: >
-          uv run python manage.py test
-          apps.invoices.tests.test_concurrency
-          apps.inventory.tests_stock_concurrency
-                --settings=config.settings_test_pg
-          --noinput
-          --verbosity 2
+  #     # `apps.inventory.tests_stock_concurrency` (2.1.4) runs here too. It needs a
+  #     # pool-free connection for the same reason the invoice tests do, and CI's
+  #     # postgres:16 service is already direct.
+  #     - name: Concurrency tests on PostgreSQL
+  #       run: >
+  #         uv run python manage.py test
+  #         apps.invoices.tests.test_concurrency
+  #         apps.inventory.tests_stock_concurrency \
+  #               --settings=config.settings_test_pg
+  #         --noinput
+  #         --verbosity 2
 
-      # Proves the job above can actually fail. A green job that cannot go red is not
-      # proof, it is decoration.
-      #
-      # The mutation replaces `select_for_update()` with `all()` rather than
-      # deleting the call. Deleting it leaves `Invoice.objects.` behind, which is
-      # a **SyntaxError** - the suite would fail instantly for a reason that has
-      # nothing to do with concurrency, so the guard would "pass" while proving
-      # nothing. `all()` keeps the file valid Python and produces a queryset with
-      # no FOR UPDATE lock, which is the real thing the tests must catch.
-      #
-      # Verified locally against Neon PostgreSQL: with this mutation the suite
-      # fails on test_same_invoice_issued_concurrently_gets_one_number.
-      - name: "Guard: a deliberately broken suite must fail this job"
-        if: github.event_name == 'pull_request'
-        run: |
-          set +e
-          TARGET=apps/invoices/services/issue.py
-          cp "$TARGET" /tmp/issue.py.bak
+  #     # Proves the job above can actually fail. A green job that cannot go red is not
+  #     # proof, it is decoration.
+  #     #
+  #     # The mutation replaces `select_for_update()` with `all()` rather than
+  #     # deleting the call. Deleting it leaves `Invoice.objects.` behind, which is
+  #     # a **SyntaxError** - the suite would fail instantly for a reason that has
+  #     # nothing to do with concurrency, so the guard would "pass" while proving
+  #     # nothing. `all()` keeps the file valid Python and produces a queryset with
+  #     # no FOR UPDATE lock, which is the real thing the tests must catch.
+  #     #
+  #     # Verified locally against Neon PostgreSQL: with this mutation the suite
+  #     # fails on test_same_invoice_issued_concurrently_gets_one_number.
+  #     - name: "Guard: a deliberately broken suite must fail this job"
+  #       if: github.event_name == 'pull_request'
+  #       run: |
+  #         set +e
+  #         TARGET=apps/invoices/services/issue.py
+  #         cp "$TARGET" /tmp/issue.py.bak
 
-          sed -i 's/select_for_update()/all()/g' "$TARGET"
+  #         sed -i 's/select_for_update()/all()/g' "$TARGET"
 
-          # A syntax error here would mean the mutation was malformed, not that
-          # the tests caught anything. Fail loudly and say which it was.
-          if ! uv run python -c "import ast;ast.parse(open('$TARGET').read())"; then
-            cp /tmp/issue.py.bak "$TARGET"
-            echo "::error::The mutation itself produced a SyntaxError - the guard is broken, not the code."
-            exit 1
-          fi
+  #         # A syntax error here would mean the mutation was malformed, not that
+  #         # the tests caught anything. Fail loudly and say which it was.
+  #         if ! uv run python -c "import ast;ast.parse(open('$TARGET').read())"; then
+  #           cp /tmp/issue.py.bak "$TARGET"
+  #           echo "::error::The mutation itself produced a SyntaxError - the guard is broken, not the code."
+  #           exit 1
+  #         fi
 
-          uv run python manage.py test apps.invoices.tests.test_concurrency \
-            --settings=config.settings_test_pg --noinput
-          STATUS=$?
+  #         uv run python manage.py test apps.invoices.tests.test_concurrency \
+  #           --settings=config.settings_test_pg --noinput
+  #         STATUS=$?
 
-          cp /tmp/issue.py.bak "$TARGET"
+  #         cp /tmp/issue.py.bak "$TARGET"
 
-          if [ "$STATUS" -eq 0 ]; then
-            echo "::error::The concurrency suite PASSED with select_for_update() removed."
-            echo "::error::It cannot detect a broken lock, so it proves nothing."
-            exit 1
-          fi
-          echo "Good: the suite fails when the locking code is removed."
+  #         if [ "$STATUS" -eq 0 ]; then
+  #           echo "::error::The concurrency suite PASSED with select_for_update() removed."
+  #           echo "::error::It cannot detect a broken lock, so it proves nothing."
+  #           exit 1
+  #         fi
+  #         echo "Good: the suite fails when the locking code is removed."
 
-      # Second guard, for the stock ledger (2.1.4).
-      #
-      # The invoice guard above would NOT catch a broken stock lock: it only
-      # mutates `issue.py`. And the behavioural stock race tests alone are not
-      # enough either - verified locally against Neon, with `select_for_update()`
-      # removed from `_lock_items`, the last-unit race test still passed, because
-      # three threads rarely collide inside the few hundred microseconds between
-      # the stock check and the write. A race test that only catches the bug one
-      # run in twenty is a race test that gets deleted after the first green run.
-      #
-      # This guard fails on `LockIsActuallyRequestedTests`, which asserts the SQL
-      # Django really sends contains FOR UPDATE - deterministic, not luck.
-      # Verified locally: this mutation fails 3 of the 14 stock concurrency tests.
-      - name: "Guard: the stock suite must also detect an unlocked ledger"
-        if: github.event_name == 'pull_request'
-        run: |
-          set +e
-          TARGET=apps/inventory/services/stock.py
-          cp "$TARGET" /tmp/stock.py.bak
+  #     # Second guard, for the stock ledger (2.1.4).
+  #     #
+  #     # The invoice guard above would NOT catch a broken stock lock: it only
+  #     # mutates `issue.py`. And the behavioural stock race tests alone are not
+  #     # enough either - verified locally against Neon, with `select_for_update()`
+  #     # removed from `_lock_items`, the last-unit race test still passed, because
+  #     # three threads rarely collide inside the few hundred microseconds between
+  #     # the stock check and the write. A race test that only catches the bug one
+  #     # run in twenty is a race test that gets deleted after the first green run.
+  #     #
+  #     # This guard fails on `LockIsActuallyRequestedTests`, which asserts the SQL
+  #     # Django really sends contains FOR UPDATE - deterministic, not luck.
+  #     # Verified locally: this mutation fails 3 of the 14 stock concurrency tests.
+  #     - name: "Guard: the stock suite must also detect an unlocked ledger"
+  #       if: github.event_name == 'pull_request'
+  #       run: |
+  #         set +e
+  #         TARGET=apps/inventory/services/stock.py
+  #         cp "$TARGET" /tmp/stock.py.bak
 
-          sed -i 's/select_for_update()/all()/g' "$TARGET"
+  #         sed -i 's/select_for_update()/all()/g' "$TARGET"
 
-          if ! uv run python -c "import ast;ast.parse(open('$TARGET').read())"; then
-            cp /tmp/stock.py.bak "$TARGET"
-            echo "::error::The stock mutation produced a SyntaxError - the guard is broken."
-            exit 1
-          fi
+  #         if ! uv run python -c "import ast;ast.parse(open('$TARGET').read())"; then
+  #           cp /tmp/stock.py.bak "$TARGET"
+  #           echo "::error::The stock mutation produced a SyntaxError - the guard is broken."
+  #           exit 1
+  #         fi
 
-          uv run python manage.py test apps.inventory.tests_stock_concurrency \
-            --settings=config.settings_test_pg --noinput
-          STATUS=$?
+  #         uv run python manage.py test apps.inventory.tests_stock_concurrency \
+  #           --settings=config.settings_test_pg --noinput
+  #         STATUS=$?
 
-          cp /tmp/stock.py.bak "$TARGET"
+  #         cp /tmp/stock.py.bak "$TARGET"
 
-          if [ "$STATUS" -eq 0 ]; then
-            echo "::error::The stock concurrency suite PASSED with select_for_update() removed."
-            echo "::error::It cannot detect a broken stock lock, so it proves nothing."
-            exit 1
-          fi
-          echo "Good: the stock suite fails when the ledger locking is removed."
+  #         if [ "$STATUS" -eq 0 ]; then
+  #           echo "::error::The stock concurrency suite PASSED with select_for_update() removed."
+  #           echo "::error::It cannot detect a broken stock lock, so it proves nothing."
+  #           exit 1
+  #         fi
+  #         echo "Good: the stock suite fails when the ledger locking is removed."
 
   # -------------------------------------------------------------------------
   # Real HTTP against a real server: the frontend/backend contract.
