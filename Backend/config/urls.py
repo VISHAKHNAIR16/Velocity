@@ -33,6 +33,9 @@ urlpatterns = [
     path("api/v1/", include("apps.invoices.urls")),
     path("api/v1/", include("apps.payments.urls")),
     path("api/v1/", include("apps.dashboard.urls")),
+    path("api/v1/", include("apps.purchases.urls")),
+    path("api/v1/", include("apps.expenses.urls")),
+    path("api/v1/", include("apps.quotations.urls")),
 ]
 
 # Development only: serve locally uploaded files when Cloudinary isn't configured.

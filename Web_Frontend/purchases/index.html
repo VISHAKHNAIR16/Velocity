@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Purchases | Velocity</title>
+  <link rel="stylesheet" href="/shared/css/theme.css" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/shared/js/tailwind-config.js"></script>
+</head>
+<body class="min-h-screen bg-page">
+  <header id="nav" class="bg-navy"></header>
+
+  <main class="mx-auto max-w-7xl px-4 py-8">
+    <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-8">
+      <div>
+        <h1 class="text-2xl font-bold text-navy">Purchases</h1>
+        <p class="mt-1 text-sm text-muted">Record supplier bills and track what you owe.</p>
+      </div>
+      <button id="record-purchase-btn" type="button" class="btn btn-primary w-full sm:w-auto">
+        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        Record Purchase
+      </button>
+    </div>
+
+    <div class="card mb-6 p-4">
+      <div class="flex flex-col sm:flex-row gap-4">
+        <div class="flex-1 sm:w-48">
+          <label class="label" for="status-filter">Status</label>
+          <select id="status-filter" class="input mt-1" aria-label="Filter by status">
+            <option value="">All</option>
+            <option value="ISSUED">Issued</option>
+            <option value="DRAFT">Draft</option>
+            <option value="CANCELLED">Cancelled</option>
+          </select>
+        </div>
+        <div class="flex-1 min-w-[200px]">
+          <label class="label" for="search-input">Search</label>
+          <div class="relative mt-1">
+            <input id="search-input" type="search" class="input pl-10 pr-10" placeholder="Search party or bill..." aria-label="Search purchases" autocomplete="off" />
+          </div>
+        </div>
+        <div class="flex-1 sm:w-48">
+          <label class="label" for="date-from-filter">From Date</label>
+          <input id="date-from-filter" type="date" class="input mt-1" aria-label="From date" />
+        </div>
+        <div class="flex-1 sm:w-48">
+          <label class="label" for="date-to-filter">To Date</label>
+          <input id="date-to-filter" type="date" class="input mt-1" aria-label="To date" />
+        </div>
+      </div>
+    </div>
+
+    <div class="mb-6 grid gap-3 sm:grid-cols-4">
+      <div class="card p-4">
+        <div class="text-xs font-medium text-slate-500 uppercase tracking-wider">Total Purchases</div>
+        <div class="mt-1 text-lg font-bold text-navy" id="summary-total">₹0.00</div>
+      </div>
+      <div class="card p-4">
+        <div class="text-xs font-medium text-slate-500 uppercase tracking-wider">Count</div>
+        <div class="mt-1 text-lg font-bold text-navy" id="summary-count">0</div>
+      </div>
+    </div>
+
+    <section class="card" id="table-card">
+      <div class="overflow-x-auto" id="table-wrap">
+        <table class="w-full min-w-[900px]" role="grid">
+          <thead>
+            <tr class="border-b border-line">
+              <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">Date</th>
+              <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">Supplier</th>
+              <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">Bill No.</th>
+              <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider hidden sm:table-cell">Status</th>
+              <th scope="col" class="px-4 py-3 text-right text-xs font-semibold text-muted uppercase tracking-wider">Amount</th>
+              <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider hidden sm:table-cell">Supply</th>
+              <th scope="col" class="px-4 py-3 text-right text-xs font-semibold text-muted uppercase tracking-wider w-[60px]"><span class="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody id="purchases-tbody" class="divide-y divide-line-soft"></tbody>
+        </table>
+      </div>
+      <div id="loading-state" class="hidden py-12 px-4">
+        <div class="space-y-3">
+          <div class="h-12 bg-tint rounded animate-pulse"></div>
+          <div class="h-12 bg-tint rounded animate-pulse"></div>
+          <div class="h-12 bg-tint rounded animate-pulse"></div>
+        </div>
+      </div>
+      <div id="empty-state" class="hidden py-12 px-4 text-center">
+        <div class="mx-auto w-16 h-16 rounded-full bg-tint flex items-center justify-center mb-4">
+          <svg class="w-8 h-8 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        </div>
+        <h3 id="empty-title" class="text-lg font-medium text-navy mb-1">No purchases yet</h3>
+        <p id="empty-text" class="text-sm text-muted mb-4">Record your first supplier bill to start tracking what you owe.</p>
+        <button id="empty-action" type="button" class="btn btn-primary hidden">Record Purchase</button>
+      </div>
+      <div id="error-state" class="hidden py-12 px-4 text-center">
+        <div class="mx-auto w-12 h-12 rounded-full bg-danger-soft flex items-center justify-center mb-3">
+          <svg class="w-6 h-6 text-danger" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+        </div>
+        <h3 class="text-lg font-medium text-navy mb-1">Unable to load purchases</h3>
+        <p id="error-text" class="text-sm text-muted mb-4">Something went wrong. Please try again.</p>
+        <button id="retry-btn" type="button" class="btn btn-primary">Try Again</button>
+      </div>
+    </section>
+  </main>
+
+  <div id="purchase-drawer" class="fixed inset-0 z-50 hidden" role="dialog" aria-modal="true" aria-labelledby="purchase-drawer-title">
+    <div class="drawer-backdrop fixed inset-0 bg-navy/30" data-close></div>
+    <div class="drawer-panel fixed inset-y-0 right-0 w-full max-w-md bg-surface shadow-xl flex flex-col transform transition-transform duration-200 ease-out" style="transform: translateX(100%);">
+      <header class="flex items-start justify-between gap-4 p-4 border-b border-line flex-shrink-0">
+        <div>
+          <h2 id="purchase-drawer-title" class="text-lg font-semibold text-navy">Record Purchase</h2>
+          <p id="purchase-drawer-subtitle" class="text-sm text-muted mt-0.5">Fields marked <span class="text-danger">*</span> are required.</p>
+        </div>
+        <button type="button" class="icon-btn p-1 rounded-lg text-muted hover:text-navy hover:bg-tint" data-close aria-label="Close drawer">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </header>
+      <form id="purchase-form" class="flex-1 overflow-y-auto p-4 space-y-6" novalidate>
+        <p id="purchase-form-message" data-form-message class="hidden rounded-lg p-3 text-sm"></p>
+        <section>
+          <h3 class="text-xs font-semibold text-muted uppercase tracking-wider mb-4">Supplier Details</h3>
+          <div class="space-y-4">
+            <div class="grid sm:grid-cols-2 gap-4">
+              <div>
+                <label for="pf-party" class="label">Supplier <span class="text-danger">*</span></label>
+                <select id="pf-party" name="party" class="input" required>
+                  <option value="">Select supplier</option>
+                </select>
+                <p data-error-for="party" class="field-error"></p>
+              </div>
+              <div>
+                <label for="pf-purchase-date" class="label">Date <span class="text-danger">*</span></label>
+                <input id="pf-purchase-date" name="purchase_date" type="date" class="input" required />
+                <p data-error-for="purchase_date" class="field-error"></p>
+              </div>
+              <div class="sm:col-span-2">
+                <label for="pf-bill-number" class="label">Supplier Bill Number</label>
+                <input id="pf-bill-number" name="bill_number" type="text" maxlength="64" class="input" placeholder="Supplier's invoice/bill number" />
+                <p data-error-for="bill_number" class="field-error"></p>
+              </div>
+              <div>
+                <label for="pf-place-of-supply" class="label">Place of Supply <span class="text-danger">*</span></label>
+                <select id="pf-place-of-supply" name="place_of_supply" class="input" required></select>
+                <p data-error-for="place_of_supply" class="field-error"></p>
+              </div>
+              <div>
+                <label for="pf-supply-type" class="label">Supply Type <span class="text-danger">*</span></label>
+                <select id="pf-supply-type" name="supply_type" class="input" required>
+                  <option value="INTRA">Intra-state (CGST + SGST)</option>
+                  <option value="INTER">Inter-state (IGST)</option>
+                </select>
+                <p data-error-for="supply_type" class="field-error"></p>
+              </div>
+              <div class="sm:col-span-2">
+                <label for="pf-notes" class="label">Notes</label>
+                <textarea id="pf-notes" name="notes" rows="2" class="input" placeholder="Remarks about this purchase"></textarea>
+                <p data-error-for="notes" class="field-error"></p>
+              </div>
+            </div>
+          </div>
+        </section>
+        <div class="border-t border-line pt-6"></div>
+        <section>
+          <h3 class="text-xs font-semibold text-muted uppercase tracking-wider mb-4">Line Items</h3>
+          <div id="item-lines" class="space-y-2"></div>
+          <button type="button" id="add-item-line" class="btn btn-ghost w-fit">
+            <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+            Add line
+          </button>
+        </section>
+      </form>
+      <footer class="flex justify-end gap-3 p-4 border-t border-line flex-shrink-0 bg-tint/50">
+        <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+        <button type="submit" form="purchase-form" id="purchase-submit-btn" class="btn btn-primary">Record Purchase</button>
+      </footer>
+    </div>
+  </div>
+
+  <script src="/shared/js/config.js"></script>
+  <script src="/shared/js/api.js"></script>
+  <script src="/shared/js/ui.js"></script>
+  <script src="/purchases/purchases.js"></script>
+</body>
+</html>

@@ -448,6 +448,90 @@ def _set_tracking_locked(business, item, enabled, opening_quantity, user):
     )
 
 
+def commit_purchase_movements(purchase, lines, label: str, user=None) -> list:
+    """
+    Write PURCHASE stock movements for a purchase bill's lines.
+
+    Adds stock (positive quantity_change) for each item-backed, tracked,
+    product line. Mirrors `commit_sale` but in the purchase direction.
+    """
+    from ..models import Item
+
+    movements = []
+    running: dict[int, Decimal] = {}
+    business = purchase.business
+
+    for line in lines:
+        item_id = int(line["item_id"])
+        qty = Decimal(str(line["quantity"]))
+        if qty <= 0:
+            continue
+
+        item = Item.objects.select_for_update().get(pk=item_id)
+        balance = running.get(item_id, item.current_stock or ZERO) + qty
+        running[item_id] = balance
+
+        movements.append(
+            StockMovement.objects.create(
+                business=business,
+                item=item,
+                movement_type=MovementType.PURCHASE,
+                quantity_change=qty,
+                stock_after=balance,
+                source_type=SourceType.PURCHASE,
+                source_id=purchase.pk,
+                source_line_id=line.get("line_id"),
+                source_label=label[:32],
+                created_by=user if (user and user.is_authenticated) else None,
+            )
+        )
+
+    _write_balances(business, running)
+    return movements
+
+
+def reverse_purchase_movements(purchase_return, lines, label: str, user=None) -> list:
+    """
+    Write PURCHASE_RETURN stock movements for a purchase return's lines.
+
+    Removes stock (negative quantity_change) for each returned line. Mirrors
+    `reverse_sale` but in the purchase direction.
+    """
+    from ..models import Item
+
+    movements = []
+    running: dict[int, Decimal] = {}
+    business = purchase_return.business
+
+    for line in lines:
+        item_id = int(line["purchase_item"].item_id)
+        qty = Decimal(str(line["quantity"]))
+        if qty <= 0:
+            continue
+
+        item = Item.objects.select_for_update().get(pk=item_id)
+        balance = running.get(item_id, item.current_stock or ZERO) - qty
+        running[item_id] = balance
+
+        movements.append(
+            StockMovement.objects.create(
+                business=business,
+                item=item,
+                movement_type=MovementType.PURCHASE_RETURN,
+                quantity_change=-qty,
+                stock_after=balance,
+                source_type=SourceType.PURCHASE,
+                source_id=purchase_return.purchase_id,
+                source_line_id=line["purchase_item"].pk,
+                source_label=label[:32],
+                created_by=user if (user and user.is_authenticated) else None,
+            )
+        )
+
+    _write_balances(business, running)
+    return movements
+
+
 def ledger_balance(item) -> Decimal:
     """The authoritative balance: the sum of the ledger, not the cache."""
     total = item.stock_movements.aggregate(total=Sum("quantity_change"))["total"]

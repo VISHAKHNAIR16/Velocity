@@ -152,17 +152,70 @@ After the run above, both of these must exit 0:
 - [ ] Deleting a user who owns invoices is refused
 - [ ] Closing an account deactivates rather than deletes
 
-## 6. Purchases (2.2) — **REMOVED 2026-10-12; nothing to test here**
+## 6. Purchases (Phase 4)
 
-> The purchases module was removed in full. This section is kept so the gap in
-> the numbering is explained rather than looking like an oversight.
+### 6a. Creating a purchase bill
+- [ ] Select a **supplier** party (party_type = SUPPLIER or BOTH)
+- [ ] Enter supplier bill number, date, place of supply, supply type (INTRA/INTER)
+- [ ] Add line items with item, quantity, unit price, tax rate
+- [ ] **INTRA state:** CGST + SGST each = rate/2%, IGST = 0
+- [ ] **INTER state:** IGST = rate%, CGST = SGST = 0
+- [ ] Save → bill is **ISSUED** immediately, stock increases via `PURCHASE` movement
+- [ ] Stock history shows `PURCHASE` rows for each line
 
-## 7. Invoice PDF (2.3)
+### 6b. Purchase return (debit note)
+- [ ] Open an issued purchase bill
+- [ ] Create a return with return number, date, reason
+- [ ] Select purchase items and quantities to return (cannot exceed purchased qty)
+- [ ] Save → stock decreases via `PURCHASE_RETURN` movement, tax reversed pro-rata
+- [ ] Return grand total matches pro-rata calculation
+
+### 6c. Tenant isolation
+- [ ] A purchase from business A does not appear in business B's list
+- [ ] Cross-tenant purchase item IDs are rejected (400)
+
+## 7. Expenses (Phase 4)
+
+- [ ] Select an expense category (Rent, Utilities, Salaries, etc.)
+- [ ] Enter date, amount (>0), tax paid (>=0), payment mode
+- [ ] Optional: reference number, notes, receipt URL (Cloudinary)
+- [ ] Save → expense appears in list with total_with_tax = amount + tax_paid
+- [ ] Edit and delete expenses (expenses are editable, unlike payments)
+- [ ] **Summary endpoint:** totals by category and by month render correctly
+- [ ] Tenant isolation: another business's expenses never appear
+
+## 8. Quotations & Estimates (Phase 4)
+
+- [ ] Select a **customer** party (party_type = CUSTOMER or BOTH)
+- [ ] Enter quote date, valid-until (default 30 days), notes, terms
+- [ ] Add line items with GST calculation
+- [ ] Save → quotation is **DRAFT**
+- [ ] **Send:** status changes to SENT
+- [ ] **Convert to Invoice:** one-click POST creates a DRAFT Invoice, quotation becomes CONVERTED
+- [ ] Cannot convert an already-converted or expired quotation (409)
+- [ ] Cannot edit/delete a non-DRAFT quotation
+
+## 9. GSTR Reports (Phase 4)
+
+- [ ] Select a tax period (YYYY-MM) and report type (GSTR-1 / GSTR-3B)
+- [ ] **GSTR-1:** B2B (registered parties), B2C Large (inter-state unregistered > ₹1 lakh), B2C Small, HSN summary
+- [ ] **GSTR-3B:** Outward supplies, input tax credit (from purchases), net tax liability
+- [ ] **Export CSV:** downloads a .csv file with correct filename
+- [ ] **Export Excel:** downloads a .xlsx file (openpyxl) with correct filename
+- [ ] Empty period shows zero totals, no crash
+## 10. Payments (carried over from 3.1, still unsigned)
+
+- [ ] Record a Payment In against an issued invoice
+- [ ] Invoice status updates UNPAID → PARTIAL → PAID
+- [ ] Record a Payment Out to a supplier
+- [ ] Payments are append-only: no edit/delete after creation
+
+## 11. Invoice PDF (2.3)
 
 > Requires the engine. Run `python manage.py check_pdf_engine` on the server first -
 > if it reports UNAVAILABLE, none of this will work and the host needs Pango.
 
-### 7a. The picker
+### 11a. The picker
 
 - [ ] An **issued** invoice shows **Download PDF** with a template dropdown
 - [ ] A **draft** shows no download button at all
@@ -172,7 +225,7 @@ After the run above, both of these must exit 0:
 - [ ] The filename carries the invoice number and the template name
 - [ ] The invoice list row has a PDF action on issued invoices
 
-### 7b. The document itself
+### 11b. The document itself
 
 - [ ] The grand total shows **`₹`** - not a box, not a blank
 - [ ] GSTIN, address and place of supply (name **and** code) are present
@@ -183,7 +236,7 @@ After the run above, both of these must exit 0:
 - [ ] The signature area is drawn **even with no signature uploaded** - blank, not missing
 - [ ] A logo appears if one was uploaded
 
-### 7c. The guarantee that matters
+### 11c. The guarantee that matters
 
 - [ ] Note the bank account number on a business, issue an invoice, download it
 - [ ] **Change** the bank account number on the business profile
@@ -192,14 +245,14 @@ After the run above, both of these must exit 0:
 - [ ] Rename the customer, download again - the old name is still there
 - [ ] Change an item's rate, download again - the old rate is still there
 
-### 7d. Long documents
+### 11d. Long documents
 
 - [ ] Open a draft with about **150 lines**, issue it, download it
 - [ ] The **column headings repeat** on page 2 onward
 - [ ] The grand total is **not split** across a page break
 - [ ] File size is sane (a 150-line invoice should be well under 1 MB)
 
-### 7e. Hostile input
+### 11e. Hostile input
 
 - [ ] Rename a customer to `<script>alert(1)</script>` and issue - the PDF shows
       the text, and nothing executes

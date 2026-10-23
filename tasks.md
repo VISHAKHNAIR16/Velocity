@@ -1429,49 +1429,181 @@ customers should go live without this.
 
 ---
 
-## Phase 4: Advanced GST Compliance, Expense Tracking & Mobile API
+## Phase 4: Advanced GST Compliance, Expense Tracking & Mobile API **COMPLETED** ✅
 
-## Phase 4: Advanced GST Compliance, Expense Tracking & Mobile API
+### Decisions taken (all resolved 2026-10-22)
 
-### 4.1 Expense Management Module
-- [ ] **4.1.1 Expense Data Schema & API**
-  - [ ] Build `ExpenseCategory` Model (Rent, Utilities, Salaries, Transport, Office Supplies).
-  - [ ] Build `Expense` Model (Business FK, Category FK, Date, Amount, Tax Paid, Payment Mode, Notes, Receipt Attachment).
-  - [ ] Implement API endpoints (`/api/v1/expenses/`).
-  - [ ] Build UI page to log operational expenses and track business overheads.
+| # | Question | Decision | Why |
+|---|---|---|---|
+| 46 | **Purchases module** | Built new `apps/purchases` from scratch | 2.2 purchase tables were removed; building fresh avoids resurrecting stale schema. |
+| 47 | **Expense categories** | Hardcoded seed list + user can add custom | Simpler, covers 90% of SMEs. `ExpenseCategory.is_default` flags seed categories. |
+| 48 | **Expense receipt attachment** | Cloudinary URL (`receipt_url` URLField) | Consistent with 2.3 logo/snapshot pattern. Receipts are supporting documents. |
+| 49 | **GSTR-1 B2C Large threshold** | ₹1 lakh | Verified against current GSTR-1 instructions; kept as `B2C_LARGE_THRESHOLD` in `apps.core.constants`. |
+| 50 | **GSTR export format** | Both CSV and Excel (.xlsx) | `openpyxl` added to requirements; both formats generated from same in-memory row data. |
+| 51 | **Quotation validity period** | User-selectable with default 30 days | Flexibility matters for B2B quotes. `valid_until` is a writable field. |
+| 52 | **Quotation→Invoice conversion** | Atomic (one POST creates DRAFT invoice) | Matches "convert with one click" UX; `@transaction.atomic` wraps invoice + quotation update. |
+| 53 | **Purchase returns** | Linked to purchase bill, `PURCHASE_RETURN` movement | Decreases stock via `PURCHASE_RETURN` movement, reverses tax pro-rata. |
 
-### 4.2 GST Reports & Tax Filing Exports
-- [ ] **4.2.1 GSTR-1 & GSTR-3B Summary Engine**
-  - [ ] Implement `services/gst_reports.py`:
-    - **B2B Invoices Section:** Filter sales to registered parties (having valid GSTIN).
-    - **B2C Large Section:** Inter-state sales to unregistered parties above the current threshold. ⚖️ I believe this was lowered from ₹2.5 lakh to **₹1 lakh** for periods from Aug 2024 — verify against the current GSTR-1 instructions and keep the threshold in one constant.
-    - **B2C Small Section:** Other sales to unregistered parties.
-    - **HSN Summary Section:** Group sales quantity, taxable value, and tax breakdown by HSN Code. **Reuse the HSN/SAC helpers from `apps.core.constants`.**
-    - **Credit/debit note tables** (from 2.4) and **input-tax summary** (`itc_eligible` lines from 2.2). Read from line snapshots only.
-  - [ ] Build export handlers generating **Excel (.xlsx)** or **CSV** files formatted to match standard GST Portal filing requirements.
-  - [ ] Build UI view displaying GST summary report cards with "Download GSTR-1 Data" action buttons.
+---
 
-### 4.3 Quotations & Estimates
-- [ ] **4.3.1 Estimate Management Schema & Conversion Action**
-  - [ ] Build `Quotation` Model and `QuotationItem` Model.
-  - [ ] Create API endpoint (`POST /api/v1/quotations/{id}/convert-to-invoice/`):
-    - Atomically creates a new **`DRAFT`** `Invoice` using quotation details (the user reviews, then issues).
-    - Updates quotation status to `CONVERTED`.
-  - [ ] Build UI form for creating Estimates/Quotations and converting them to active GST Invoices with one click.
+### Errors / Mishaps encountered during implementation
 
-### 4.4 Mobile API Readiness (For Future Flutter App)
-- [ ] **4.4.1 OpenAPI & Mobile Security Standards**
-  - [ ] Integrate `drf-spectacular` or `drf-yasg` to generate complete Swagger/OpenAPI documentation (`/api/schema/swagger-ui/`).
-  - [ ] Verify JWT token expiration and refresh token workflow (`/api/v1/token/`, `/api/v1/token/refresh/`).
-  - [ ] Verify CORS headers allow incoming requests from mobile origin domains or native HTTP clients.
-  - [ ] Audit all API endpoints to guarantee strict JSON payloads with consistent error response formats:
-    ```json
-    {
-      "success": false,
-      "error": "INSUFFICIENT_STOCK",
-      "message": "Only 3 units of Item X remain in stock."
-    }
-    ```
+| # | Issue | Fix |
+|---|-------|-----|
+| M1 | `PurchaseCalculationError` missing `status` attribute → `AttributeError` in `api_errors.translate()` | Added `status: int = 400` parameter to `PurchaseCalculationError.__init__`. |
+| M2 | GST calculator applied full tax rate to both CGST and SGST for INTRA supply → double tax | Split rate: CGST = rate/2%, SGST = rate/2% for INTRA; IGST = rate% for INTER. |
+| M3 | `compute_totals()` from `draft.py` uses `zip(strict=True)` which fails when invoice items don't exist yet | Moved `apply_invoice_totals()` call to *after* invoice line items are created in `convert_to_invoice()`. |
+| M4 | `QuotationConflict.__init__()` didn't accept `field` parameter | Added `field: str = ""` to `QuotationConflict.__init__`. |
+| M5 | `LineResult` object not subscriptable (`line_result["taxable_value"]`) | Changed to attribute access: `line_result.taxable_value`. |
+| M6 | `strftime()` on PostgreSQL `date` column → `UndefinedFunction` | Replaced `extra(select={"month": ...})` with Django `TruncMonth("expense_date")`. |
+| M7 | `other_client` unused variable in expenses/quotations tests | Removed unused variable. |
+| M8 | `q2` undefined in `purchase_service.py` `record_purchase_return()` | Added `from apps.core.money import q2`. |
+| M9 | Import sorting / unused imports across 15+ files | Fixed with `ruff check --fix` and manual edits. |
+
+---
+
+### 4.1 Expense Management Module **COMPLETED**
+
+#### 4.1.1 Data Schema & API
+
+**New `apps/expenses/` app:**
+
+- **`ExpenseCategory` model** (`TenantModel`): `name`, `is_default`, `description`. Unique constraint on `(business, name)`.
+- **`Expense` model** (`TenantModel`): `category` FK, `expense_date` (indexed), `amount` (>0), `tax_paid` (>=0), `payment_mode` (CASH/BANK_TRANSFER/UPI/CHEQUE), `reference_number`, `notes`, `receipt_url` (Cloudinary URL). Indexes: `(business, expense_date)`, `(business, category)`, `(business, payment_mode)`.
+- **Serializers**: `ExpenseCategorySerializer`, `ExpenseSerializer` (all computed fields read_only).
+- **Views**: `ExpenseViewSet` (full CRUD), `ExpenseCategoryViewSet`. Custom action `GET /api/v1/expenses/summary/` — totals by category and month using `TruncMonth`.
+- **URLs**: `apps/expenses/urls.py` mounted under `/api/v1/`.
+- **Admin**: full CRUD for both models.
+- **Settings**: `"apps.expenses"` in `INSTALLED_APPS`.
+- **Migrations**: `0001_initial.py`.
+
+#### 4.1.2 UI — Expenses Page
+
+- `Web_Frontend/expenses/index.html` — expense list table, summary chips, filters, "Add Expense" drawer.
+- `Web_Frontend/expenses/expenses.js` — CRUD, summary aggregation, category/date filters, drawer modal.
+- "Expenses" nav link added to `Web_Frontend/shared/js/ui.js`.
+
+---
+
+### 4.2 GST Reports & Tax Filing Exports **COMPLETED**
+
+#### 4.2.1 GSTR-1 & GSTR-3B Summary Engine
+
+**`apps/invoices/services/gst_reports.py`:**
+
+- **B2B Invoices**: ISSUED sales invoices to registered parties (GSTIN present).
+- **B2C Large**: Inter-state sales to unregistered parties above ₹1 lakh threshold.
+- **B2C Small**: Other sales to unregistered parties.
+- **HSN Summary**: Grouped by HSN/SAC code with quantity, taxable value, CGST/SGST/IGST.
+- **Input-Tax Credit**: From `ISSUED` purchase bills with GSTIN, read from line snapshots.
+
+**`apps/invoices/services/gst_export.py`:**
+
+- CSV export: `export_gstr1_csv()`, `export_gstr3b_csv()`.
+- Excel export: `export_gstr1_excel()`, `export_gstr3b_excel()` (openpyxl).
+- Both formats generated from same in-memory row data.
+
+**API views** (`apps/invoices/views.py`):
+
+- `GSTR1View`: `GET /api/v1/gstr1/?period=YYYY-MM` (+ `?format=csv\|xlsx` for export).
+- `GSTR3BView`: `GET /api/v1/gstr3b/?period=YYYY-MM` (+ `?format=csv\|xlsx` for export).
+- URLs: `apps/invoices/urls.py` — `gstr1/` and `gstr3b/` routes.
+
+#### 4.2.2 UI — GSTR Reports Page
+
+- `Web_Frontend/gstr/index.html` — period picker, report type selector, export format selector, report table.
+- `Web_Frontend/gstr/gstr.js` — fetch report, render table, CSV/Excel export via fetch + blob download.
+- "GSTR Reports" nav link added to `Web_Frontend/shared/js/ui.js`.
+
+---
+
+### 4.3 Quotations & Estimates **COMPLETED**
+
+#### 4.3.1 Data Schema & API
+
+**New `apps/quotations/` app:**
+
+- **`Quotation` model** (`TenantModel`): `party` FK, `quotation_date`, `valid_until`, `status` (DRAFT/SENT/CONVERTED/EXPIRED/LOST), snapshots (customer/business), money fields (server-computed), `converted_invoice` FK, `converted_at`.
+- **`QuotationItem` model** (`TenantModel`): item snapshots, quantity, unit_price, tax_rate, line totals.
+- **Serializers**: `QuotationSerializer`, `QuotationListSerializer`, `QuotationItemSerializer`.
+- **Views**: `QuotationViewSet` (full CRUD). Custom action `POST /api/v1/quotations/{id}/convert-to-invoice/` — atomically creates DRAFT `Invoice`, marks quotation `CONVERTED`.
+- **URLs**: `apps/quotations/urls.py` mounted under `/api/v1/`.
+- **Admin**: full CRUD with inline items.
+- **Settings**: `"apps.quotations"` in `INSTALLED_APPS`.
+- **Migrations**: `0001_initial.py`.
+
+#### 4.3.2 UI — Quotations Page
+
+- `Web_Frontend/quotations/index.html` — quotation list table, status badges, "Create Quotation" drawer.
+- `Web_Frontend/quotations/quotations.js` — CRUD, convert-to-invoice action (`POST /api/v1/quotations/{id}/convert-to-invoice/`), line item builder.
+- "Quotations" nav link added to `Web_Frontend/shared/js/ui.js`.
+
+---
+
+### 4.4 Mobile API Readiness — **SKIPPED** (per owner instruction)
+
+The Flutter mobile app and OpenAPI/Swagger work are deferred. The existing JWT + DRF API is already mobile-ready in structure (JSON payloads, consistent error envelopes, token refresh).
+
+---
+
+### 4.5 Purchases Module **COMPLETED** (decision 46)
+
+**New `apps/purchases/` app:**
+
+- **`Purchase` model** (`TenantModel`): `party` FK (supplier), `purchase_date`, `bill_number`, `place_of_supply`, `supply_type`, snapshots, money fields (server-computed), GST calculation via `apps/purchases/services/gst_calculator.py`.
+- **`PurchaseItem` model** (`TenantModel`): item snapshots, line totals.
+- **`PurchaseReturn` model** (`TenantModel`): links to `Purchase`, reverses stock + tax pro-rata.
+- **Services**: `record_purchase()` (atomic: bill + lines + stock movements + totals), `record_purchase_return()`.
+- **Stock movements**: `commit_purchase_movements()` / `reverse_purchase_movements()` added to `apps/inventory/services/stock.py`.
+- **Serializers**: `PurchaseSerializer`, `PurchaseListSerializer`, `PurchaseItemSerializer`, `PurchaseReturnSerializer`.
+- **Views**: `PurchaseViewSet` (full CRUD, cancel action), `PurchaseReturnViewSet` (full CRUD).
+- **URLs**: `apps/purchases/urls.py` mounted under `/api/v1/`.
+- **Admin**: full CRUD with inline items.
+- **Settings**: `"apps.purchases"` in `INSTALLED_APPS`.
+- **Migrations**: `0001_initial.py`.
+
+---
+
+### 4.5.5 Gates (all green)
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Django system check | `manage.py check` | ✅ No issues |
+| Migrations | `makemigrations purchases expenses quotations` | ✅ Created successfully |
+| Lint | `ruff check apps/purchases apps/expenses apps/quotations apps/invoices` | ✅ All checks passed |
+| Format | `ruff format apps/purchases apps/expenses apps/quotations` | ✅ Formatted |
+| Backend tests | `manage.py test apps.purchases apps.expenses apps.quotations` | ✅ 19/19 OK |
+| Existing app tests | `manage.py test apps.payments apps.parties apps.invoices apps.inventory apps.dashboard` | ✅ No regressions |
+
+---
+
+### Deferred / Out of Scope (Phase 4)
+
+- **Credit/debit notes affecting GSTR-1** → 2.4 (deferred). GSTR-1 structure is ready to accept them.
+- **E-invoicing / E-way bill integration** → Phase 6+.
+- **GSTR-2A / 2B reconciliation** → needs purchases module + vendor GSTIN matching — Phase 6+.
+- **Multi-business per user** → Phase 6+.
+- **Staff roles / permissions** → Phase 6+.
+- **Barcode scanning** → Phase 6+.
+- **Hindi localization** → Phase 6+.
+- **Recurring invoices / reminders** → Phase 6+.
+- **Stock valuation / COGS (true profit)** → 2.1.6, kept out of scope.
+
+---
+
+### Future: After Phase 4 (Phase 5+)
+
+**Phase 5: Testing, Hardening & Production Deployment** (already planned in tasks.md):
+- Multi-tenant partition tests, permission audits, env var security, `DEBUG=False`, performance indexes, backups, cloud launch.
+
+**Phase 6+ (Vision):**
+- E-invoicing (IRN) and e-way bill generation.
+- GSTR-2A/2B auto-reconciliation with vendor data.
+- Multi-business per user, staff roles, branch support.
+- Recurring invoices, payment reminders, overdue auto-follow-up.
+- Barcode scanning, batch/expiry tracking, multiple godowns.
+- Hindi/regional language support.
+- Mobile app (Flutter) consuming the same DRF APIs.
 
 ---
 

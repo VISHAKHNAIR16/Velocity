@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Expenses | Velocity</title>
+  <link rel="stylesheet" href="/shared/css/theme.css" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/shared/js/tailwind-config.js"></script>
+</head>
+<body class="min-h-screen bg-page">
+  <header id="nav" class="bg-navy"></header>
+
+  <main class="mx-auto max-w-7xl px-4 py-8">
+    <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-8">
+      <div>
+        <h1 class="text-2xl font-bold text-navy">Expenses</h1>
+        <p class="mt-1 text-sm text-muted">Log operational expenses and track business overheads.</p>
+      </div>
+      <button id="record-expense-btn" type="button" class="btn btn-primary w-full sm:w-auto">
+        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        Add Expense
+      </button>
+    </div>
+
+    <div class="card mb-6 p-4">
+      <div class="flex flex-col sm:flex-row gap-4">
+        <div class="flex-1 sm:w-48">
+          <label class="label" for="category-filter">Category</label>
+          <select id="category-filter" class="input mt-1" aria-label="Filter by category">
+            <option value="">All categories</option>
+          </select>
+        </div>
+        <div class="flex-1 min-w-[200px]">
+          <label class="label" for="search-input">Search</label>
+          <div class="relative mt-1">
+            <input id="search-input" type="search" class="input pl-10 pr-10" placeholder="Search category or reference..." aria-label="Search expenses" autocomplete="off" />
+          </div>
+        </div>
+        <div class="flex-1 sm:w-48">
+          <label class="label" for="date-from-filter">From Date</label>
+          <input id="date-from-filter" type="date" class="input mt-1" aria-label="From date" />
+        </div>
+        <div class="flex-1 sm:w-48">
+          <label class="label" for="date-to-filter">To Date</label>
+          <input id="date-to-filter" type="date" class="input mt-1" aria-label="To date" />
+        </div>
+      </div>
+    </div>
+
+    <div class="mb-6 grid gap-3 sm:grid-cols-3">
+      <div class="card p-4">
+        <div class="text-xs font-medium text-slate-500 uppercase tracking-wider">Total Expenses</div>
+        <div class="mt-1 text-lg font-bold text-navy" id="summary-total">₹0.00</div>
+      </div>
+      <div class="card p-4">
+        <div class="text-xs font-medium text-slate-500 uppercase tracking-wider">Tax Paid</div>
+        <div class="mt-1 text-lg font-bold text-navy" id="summary-tax">₹0.00</div>
+      </div>
+      <div class="card p-4">
+        <div class="text-xs font-medium text-slate-500 uppercase tracking-wider">Count</div>
+        <div class="mt-1 text-lg font-bold text-navy" id="summary-count">0</div>
+      </div>
+    </div>
+
+    <section class="card" id="table-card">
+      <div class="overflow-x-auto" id="table-wrap">
+        <table class="w-full min-w-[900px]" role="grid">
+          <thead>
+            <tr class="border-b border-line">
+              <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">Date</th>
+              <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">Category</th>
+              <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider hidden sm:table-cell">Mode</th>
+              <th scope="col" class="px-4 py-3 text-right text-xs font-semibold text-muted uppercase tracking-wider">Amount</th>
+              <th scope="col" class="px-4 py-3 text-right text-xs font-semibold text-muted uppercase tracking-wider">Tax</th>
+              <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider hidden lg:table-cell">Reference</th>
+              <th scope="col" class="px-4 py-3 text-right text-xs font-semibold text-muted uppercase tracking-wider w-[60px]"><span class="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody id="expenses-tbody" class="divide-y divide-line-soft"></tbody>
+        </table>
+      </div>
+      <div id="loading-state" class="hidden py-12 px-4">
+        <div class="space-y-3">
+          <div class="h-12 bg-tint rounded animate-pulse"></div>
+          <div class="h-12 bg-tint rounded animate-pulse"></div>
+        </div>
+      </div>
+      <div id="empty-state" class="hidden py-12 px-4 text-center">
+        <div class="mx-auto w-16 h-16 rounded-full bg-tint flex items-center justify-center mb-4">
+          <svg class="w-8 h-8 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        </div>
+        <h3 id="empty-title" class="text-lg font-medium text-navy mb-1">No expenses yet</h3>
+        <p id="empty-text" class="text-sm text-muted mb-4">Record your first expense to start tracking overheads.</p>
+        <button id="empty-action" type="button" class="btn btn-primary hidden">Add Expense</button>
+      </div>
+      <div id="error-state" class="hidden py-12 px-4 text-center">
+        <div class="mx-auto w-12 h-12 rounded-full bg-danger-soft flex items-center justify-center mb-3">
+          <svg class="w-6 h-6 text-danger" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+        </div>
+        <h3 class="text-lg font-medium text-navy mb-1">Unable to load expenses</h3>
+        <p id="error-text" class="text-sm text-muted mb-4">Something went wrong. Please try again.</p>
+        <button id="retry-btn" type="button" class="btn btn-primary">Try Again</button>
+      </div>
+    </section>
+  </main>
+
+  <div id="expense-drawer" class="fixed inset-0 z-50 hidden" role="dialog" aria-modal="true" aria-labelledby="expense-drawer-title">
+    <div class="drawer-backdrop fixed inset-0 bg-navy/30" data-close></div>
+    <div class="drawer-panel fixed inset-y-0 right-0 w-full max-w-md bg-surface shadow-xl flex flex-col transform transition-transform duration-200 ease-out" style="transform: translateX(100%);">
+      <header class="flex items-start justify-between gap-4 p-4 border-b border-line flex-shrink-0">
+        <div>
+          <h2 id="expense-drawer-title" class="text-lg font-semibold text-navy">Record Expense</h2>
+          <p id="expense-drawer-subtitle" class="text-sm text-muted mt-0.5">Fields marked <span class="text-danger">*</span> are required.</p>
+        </div>
+        <button type="button" class="icon-btn p-1 rounded-lg text-muted hover:text-navy hover:bg-tint" data-close aria-label="Close drawer">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </header>
+      <form id="expense-form" class="flex-1 overflow-y-auto p-4 space-y-6" novalidate>
+        <p id="expense-form-message" data-form-message class="hidden rounded-lg p-3 text-sm"></p>
+        <section>
+          <h3 class="text-xs font-semibold text-muted uppercase tracking-wider mb-4">Expense Details</h3>
+          <div class="space-y-4">
+            <div class="grid sm:grid-cols-2 gap-4">
+              <div>
+                <label for="pf-category" class="label">Category <span class="text-danger">*</span></label>
+                <select id="pf-category" name="category" class="input" required>
+                  <option value="">Select category</option>
+                </select>
+                <p data-error-for="category" class="field-error"></p>
+              </div>
+              <div>
+                <label for="pf-expense-date" class="label">Date <span class="text-danger">*</span></label>
+                <input id="pf-expense-date" name="expense_date" type="date" class="input" required />
+                <p data-error-for="expense_date" class="field-error"></p>
+              </div>
+              <div class="sm:col-span-2">
+                <label for="pf-amount" class="label">Amount <span class="text-danger">*</span></label>
+                <div class="input-affix"><span class="affix">₹</span><input id="pf-amount" name="amount" type="text" inputmode="decimal" data_decimal autocomplete="off" class="input" placeholder="0.00" required /></div>
+                <p data-error-for="amount" class="field-error"></p>
+              </div>
+              <div>
+                <label for="pf-tax-paid" class="label">Tax Paid</label>
+                <div class="input-affix"><span class="affix">₹</span><input id="pf-tax-paid" name="tax_paid" type="text" inputmode="decimal" data_decimal autocomplete="off" class="input" placeholder="0.00" /></div>
+                <p data-error-for="tax_paid" class="field-error"></p>
+              </div>
+              <div>
+                <label for="pf-payment-mode" class="label">Mode <span class="text-danger">*</span></label>
+                <select id="pf-payment-mode" name="payment_mode" class="input" required>
+                  <option value="CASH">Cash</option>
+                  <option value="UPI">UPI</option>
+                  <option value="BANK_TRANSFER">Bank Transfer</option>
+                  <option value="CHEQUE">Cheque</option>
+                </select>
+                <p data-error-for="payment_mode" class="field-error"></p>
+              </div>
+              <div class="sm:col-span-2">
+                <label for="pf-reference-number" class="label">Reference Number</label>
+                <input id="pf-reference-number" name="reference_number" type="text" maxlength="100" class="input" placeholder="UPI ref / cheque no. / bank ref" />
+                <p data-error-for="reference_number" class="field-error"></p>
+              </div>
+              <div class="sm:col-span-2">
+                <label for="pf-notes" class="label">Notes</label>
+                <textarea id="pf-notes" name="notes" rows="2" class="input" placeholder="Remarks about this expense"></textarea>
+                <p data-error-for="notes" class="field-error"></p>
+              </div>
+              <div class="sm:col-span-2">
+                <label for="pf-receipt-url" class="label">Receipt URL (Cloudinary)</label>
+                <input id="pf-receipt-url" name="receipt_url" type="url" maxlength="500" class="input" placeholder="https://res.cloudinary.com/..." />
+                <p data-error-for="receipt_url" class="field-error"></p>
+              </div>
+            </div>
+          </div>
+        </section>
+      </form>
+      <footer class="flex justify-end gap-3 p-4 border-t border-line flex-shrink-0 bg-tint/50">
+        <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+        <button type="submit" form="expense-form" id="expense-submit-btn" class="btn btn-primary">Record Expense</button>
+      </footer>
+    </div>
+  </div>
+
+  <script src="/shared/js/config.js"></script>
+  <script src="/shared/js/api.js"></script>
+  <script src="/shared/js/ui.js"></script>
+  <script src="/expenses/expenses.js"></script>
+</body>
+</html>

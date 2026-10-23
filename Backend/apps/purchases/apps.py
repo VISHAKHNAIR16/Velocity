@@ -1,0 +1,4 @@
+class PurchasesConfig:
+    default_auto_field = "django.db.models.BigAutoField"
+    name = "apps.purchases"
+    verbose_name = "Purchases"

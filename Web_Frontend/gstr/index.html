@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GSTR Reports | Velocity</title>
+  <link rel="stylesheet" href="/shared/css/theme.css" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/shared/js/tailwind-config.js"></script>
+</head>
+<body class="min-h-screen bg-page">
+  <header id="nav" class="bg-navy"></header>
+
+  <main class="mx-auto max-w-7xl px-4 py-8">
+    <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-8">
+      <div>
+        <h1 class="text-2xl font-bold text-navy">GSTR Reports</h1>
+        <p class="mt-1 text-sm text-muted">GSTR-1 and GSTR-3B summaries for GST Portal filing.</p>
+      </div>
+    </div>
+
+    <div class="card mb-6 p-4">
+      <div class="flex flex-col sm:flex-row gap-4">
+        <div class="flex-1 sm:w-48">
+          <label class="label" for="period-select">Tax Period</label>
+          <select id="period-select" class="input mt-1" aria-label="Select tax period"></select>
+        </div>
+        <div class="flex-1 sm:w-48">
+          <label class="label" for="report-type">Report Type</label>
+          <select id="report-type" class="input mt-1" aria-label="Select report type">
+            <option value="gstr1">GSTR-1</option>
+            <option value="gstr3b">GSTR-3B</option>
+          </select>
+        </div>
+        <div class="flex-1 sm:w-48">
+          <label class="label" for="export-format">Export Format</label>
+          <select id="export-format" class="input mt-1" aria-label="Select export format">
+            <option value="json">View Only</option>
+            <option value="csv">CSV</option>
+            <option value="xlsx">Excel (.xlsx)</option>
+          </select>
+        </div>
+        <div class="flex-1 sm:w-auto">
+          <button id="load-report-btn" type="button" class="btn btn-primary w-full">
+            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+            Load / Export
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div id="report-container" class="card hidden">
+      <div class="overflow-x-auto">
+        <table class="w-full min-w-[700px]">
+          <thead class="bg-tint/50">
+            <tr class="border-b border-line">
+              <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-muted uppercase tracking-wider">Field</th>
+              <th scope="col" class="px-4 py-3 text-right text-xs font-semibold text-muted uppercase tracking-wider">Value</th>
+            </tr>
+          </thead>
+          <tbody id="report-body" class="divide-y divide-line-soft"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="loading-state" class="hidden py-12 px-4">
+      <div class="h-12 bg-tint rounded animate-pulse"></div>
+    </div>
+    <div id="error-state" class="hidden py-12 px-4 text-center">
+      <h3 class="text-lg font-medium text-navy mb-1">Unable to load report</h3>
+      <p id="error-text" class="text-sm text-muted mb-4">Something went wrong. Please try again.</p>
+      <button id="retry-btn" type="button" class="btn btn-primary">Try Again</button>
+    </div>
+  </main>
+
+  <script src="/shared/js/config.js"></script>
+  <script src="/shared/js/api.js"></script>
+  <script src="/shared/js/ui.js"></script>
+  <script src="/gstr/gstr.js"></script>
+</body>
+</html>

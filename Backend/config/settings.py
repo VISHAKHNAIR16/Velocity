@@ -79,6 +79,12 @@ INSTALLED_APPS = [
     "apps.payments",
     # Phase 3: dashboard (3.3) — /api/v1/dashboard/stats/ and /api/v1/dashboard/low-stock/.
     "apps.dashboard",
+    # Phase 4: purchases (4.1) — purchase bills, purchase items, purchase returns.
+    "apps.purchases",
+    # Phase 4: expenses (4.1) — expense categories and operational expenses.
+    "apps.expenses",
+    # Phase 4: quotations (4.3) — estimates and convert-to-invoice.
+    "apps.quotations",
     # Provides OutstandingToken/BlacklistedToken so a refresh token can be
     # invalidated. Without it a stolen refresh token is valid for its full
     # lifetime with no way to revoke it, and "sign out of this device" cannot

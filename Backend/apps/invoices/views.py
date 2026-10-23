@@ -20,6 +20,7 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
+from rest_framework.views import APIView
 
 from apps.accounts.services import get_business
 from apps.core.fiscal import financial_year
@@ -42,6 +43,13 @@ from .services.draft import (
     resolve_place_of_supply,
 )
 from .services.gst_calculator import GSTCalculationError
+from .services.gst_export import (
+    export_gstr1_csv,
+    export_gstr1_excel,
+    export_gstr3b_csv,
+    export_gstr3b_excel,
+)
+from .services.gst_reports import gstr1_summary, gstr3b_summary
 from .services.issue import IssueError, cancel_invoice, issue_invoice
 from .services.numbering import peek_next_number
 from .services.period_rules import assert_period_open, earliest_allowed_date
@@ -577,3 +585,84 @@ class InvoiceViewSet(TenantModelViewSet):
 
         self._recalculate(draft)
         return Response(self.get_serializer(draft).data, status=status.HTTP_201_CREATED)
+
+
+# ---------------------------------------------------------------------------
+# GST Reports (Phase 4.2)
+# ---------------------------------------------------------------------------
+class GSTR1View(APIView):
+    """
+    GET /api/v1/gstr1/?period=YYYY-MM
+    GET /api/v1/gstr1/export/?period=YYYY-MM&format=csv|xlsx
+    """
+
+    def get(self, request):
+        business = get_business(request.user)
+        period = request.query_params.get("period")
+        if not period:
+            return Response(
+                {"success": False, "error": "MISSING_PERIOD", "message": "Provide ?period=YYYY-MM"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        export_format = request.query_params.get("format", "json")
+        if export_format == "csv":
+            data = export_gstr1_csv(business, period)
+            return Response(
+                data,
+                content_type="text/csv",
+                headers={
+                    "Content-Disposition": f'attachment; filename="GSTR-1_{period}.csv"'
+                },
+            )
+        if export_format == "xlsx":
+            data = export_gstr1_excel(business, period)
+            return Response(
+                data,
+                content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                headers={
+                    "Content-Disposition": f'attachment; filename="GSTR-1_{period}.xlsx"'
+                },
+            )
+
+        summary = gstr1_summary(business, period)
+        return Response(summary)
+
+
+class GSTR3BView(APIView):
+    """
+    GET /api/v1/gstr3b/?period=YYYY-MM
+    GET /api/v1/gstr3b/export/?period=YYYY-MM&format=csv|xlsx
+    """
+
+    def get(self, request):
+        business = get_business(request.user)
+        period = request.query_params.get("period")
+        if not period:
+            return Response(
+                {"success": False, "error": "MISSING_PERIOD", "message": "Provide ?period=YYYY-MM"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        export_format = request.query_params.get("format", "json")
+        if export_format == "csv":
+            data = export_gstr3b_csv(business, period)
+            return Response(
+                data,
+                content_type="text/csv",
+                headers={
+                    "Content-Disposition": f'attachment; filename="GSTR-3B_{period}.csv"'
+                },
+            )
+        if export_format == "xlsx":
+            data = export_gstr3b_excel(business, period)
+            return Response(
+                data,
+                content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                headers={
+                    "Content-Disposition": f'attachment; filename="GSTR-3B_{period}.xlsx"'
+                },
+            )
+
+        summary = gstr3b_summary(business, period)
+        return Response(summary)

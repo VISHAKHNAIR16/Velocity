@@ -3,7 +3,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from .views import InvoiceViewSet
+from .views import GSTR1View, GSTR3BView, InvoiceViewSet
 
 router = DefaultRouter()
 # Already registered with the "invoices" prefix, so it is included at "".
@@ -13,4 +13,6 @@ router.register(r"invoices", InvoiceViewSet, basename="invoice")
 
 urlpatterns = [
     path("", include(router.urls)),
+    path("gstr1/", GSTR1View.as_view(), name="gstr1"),
+    path("gstr3b/", GSTR3BView.as_view(), name="gstr3b"),
 ]

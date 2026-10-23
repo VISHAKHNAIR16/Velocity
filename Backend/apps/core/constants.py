@@ -85,6 +85,11 @@ GST_RATE_CHOICES = [
 
 DEFAULT_GST_RATE = Decimal("18.00")
 
+#: GSTR-1 B2C Large threshold (inter-state sales to unregistered parties above
+#: this amount go in the B2C Large table). Verified against current GSTR-1
+#: instructions: ₹1 lakh for periods from Aug 2024.
+B2C_LARGE_THRESHOLD = Decimal("100000.00")
+
 #: Fast membership test: {Decimal("0.00"), Decimal("5.00"), ...}
 VALID_GST_RATES = frozenset(rate for rate, _ in GST_RATE_CHOICES)
 
