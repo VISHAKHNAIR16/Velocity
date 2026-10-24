@@ -4,42 +4,188 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Log in | Velocity</title>
+  <script>document.documentElement.classList.add("js");</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/shared/css/theme.css" />
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="/shared/js/tailwind-config.js"></script>
 </head>
-<body class="min-h-screen bg-navy">
-  <main class="mx-auto max-w-md px-4 py-16">
-    <a href="/" class="text-2xl font-bold text-white">Velocity</a>
-    <div class="speed-bar mt-2 w-16 rounded"></div>
-    <h1 class="mt-6 text-xl font-semibold text-white">Log in to your account</h1>
+<body>
+  <div class="auth-shell">
 
-    <form id="login-form" class="card mt-5 space-y-4" novalidate>
-      <p data-form-message class="hidden"></p>
+    <!-- Brand panel (desktop only) -->
+    <aside class="hero auth-aside">
+      <div class="blob blob-blue" style="width:30rem;height:30rem;top:-10rem;left:-10rem"></div>
+      <div class="blob blob-cyan" style="width:24rem;height:24rem;bottom:-8rem;right:-6rem;animation-delay:-6s"></div>
+      <div class="slash" style="top:45%;left:0"></div>
 
-      <div>
-        <label for="email" class="label">Email</label>
-        <input id="email" name="email" type="email" autocomplete="email" required class="input" />
-        <p data-error-for="email" class="field-error"></p>
-      </div>
+      <a href="/" class="brand text-white" aria-label="Velocity home"><span class="brand-mark">V</span> Velocity</a>
 
       <div>
-        <label for="password" class="label">Password</label>
-        <input id="password" name="password" type="password" autocomplete="current-password" required class="input" />
-        <p data-error-for="password" class="field-error"></p>
+        <h2 class="text-4xl font-extrabold tracking-tight">Welcome back to <span class="text-gradient">full speed.</span></h2>
+        <p class="mt-3 max-w-md text-white/70">Pick up exactly where you left off.</p>
+        <ul class="mt-8 space-y-4">
+          <li class="check-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg>GST invoices in seconds</li>
+          <li class="check-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg>Stock and payments always in sync</li>
+          <li class="check-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg>Return-ready GSTR reports</li>
+        </ul>
       </div>
 
-      <button type="submit" class="btn btn-primary w-full">Log in</button>
-    </form>
+      <p class="text-sm text-white/40">GST billing, inventory and accounting.</p>
+    </aside>
 
-    <p class="mt-4 text-sm text-white/70">New here?
-      <a href="/auth/register.html" class="text-glow underline">Create an account</a>
-    </p>
-  </main>
+    <!-- Form -->
+    <main class="auth-main">
+      <a href="/" class="brand auth-mobile-brand" aria-label="Velocity home"><span class="brand-mark">V</span> Velocity</a>
+
+      <div class="auth-card reveal in">
+        <!-- System status: checked as soon as the page opens, before the user submits anything -->
+        <div id="status-panel" class="card" style="padding:0.875rem 1rem" role="status" aria-live="polite">
+          <div class="flex items-center justify-between">
+            <p class="text-xs font-semibold uppercase tracking-wider text-muted">System status</p>
+            <button type="button" id="status-retry" class="hidden text-xs font-semibold text-brand hover:underline">Check again</button>
+          </div>
+          <ul class="mt-2 grid grid-cols-3 gap-2 text-xs sm:text-sm">
+            <li class="flex items-center gap-2"><span id="dot-app" class="status-dot ok"></span>App</li>
+            <li class="flex items-center gap-2"><span id="dot-backend" class="status-dot wait"></span>Server</li>
+            <li class="flex items-center gap-2"><span id="dot-database" class="status-dot wait"></span>Database</li>
+          </ul>
+          <p id="status-msg" class="mt-2 text-xs text-muted">Checking the server...</p>
+        </div>
+
+        <h1 class="mt-6 text-2xl font-bold tracking-tight">Log in to your account</h1>
+        <p class="mt-1 text-sm text-muted">Enter your details to open your workspace.</p>
+
+        <form id="login-form" class="card mt-6 space-y-4" novalidate>
+          <p data-form-message class="hidden"></p>
+
+          <div>
+            <label for="email" class="label">Email</label>
+            <div class="field">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>
+              <input id="email" name="email" type="email" autocomplete="email" placeholder="you@business.com" required class="input" />
+            </div>
+            <p data-error-for="email" class="field-error"></p>
+          </div>
+
+          <div>
+            <label for="password" class="label">Password</label>
+            <div class="field">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg>
+              <input id="password" name="password" type="password" autocomplete="current-password" placeholder="Your password" required class="input has-toggle" />
+              <button type="button" id="pw-toggle" class="pw-toggle" aria-label="Show password" aria-pressed="false">Show</button>
+            </div>
+            <p data-error-for="password" class="field-error"></p>
+          </div>
+
+          <button type="submit" class="btn btn-primary btn-glow w-full" style="padding-top:0.7rem;padding-bottom:0.7rem">Log in</button>
+          <p id="wake-hint" class="hidden text-center text-xs text-muted">The server is waking up. The first login can take up to a minute.</p>
+        </form>
+
+        <p class="mt-5 text-center text-sm text-muted">New here?
+          <a href="/auth/register.html" class="font-semibold text-brand hover:underline">Create an account</a>
+        </p>
+      </div>
+    </main>
+  </div>
 
   <script src="/shared/js/config.js"></script>
   <script src="/shared/js/api.js"></script>
   <script src="/shared/js/ui.js"></script>
-  <script src="/auth/login.js"></script>
+  <script>
+    /** Login page logic. Backend contract unchanged: POST /auth/login/ {email, password}. */
+    redirectIfLoggedIn();
+
+    const form = document.getElementById("login-form");
+    const button = form.querySelector("button[type=submit]");
+    const wakeHint = document.getElementById("wake-hint");
+
+    /** Show/hide the password text. */
+    document.getElementById("pw-toggle").addEventListener("click", (event) => {
+      const toggle = event.currentTarget;
+      const showing = form.password.type === "text";
+      form.password.type = showing ? "password" : "text";
+      toggle.textContent = showing ? "Show" : "Hide";
+      toggle.setAttribute("aria-label", showing ? "Show password" : "Hide password");
+      toggle.setAttribute("aria-pressed", String(!showing));
+    });
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      clearErrors(form);
+      setBusy(button, true, "Logging in...");
+      const wakeTimer = setTimeout(() => wakeHint.classList.remove("hidden"), 3000);
+      try {
+        const tokens = await apiRequest("/auth/login/", {
+          method: "POST",
+          auth: false,
+          body: { email: form.email.value.trim(), password: form.password.value },
+        });
+        Auth.save(tokens);
+        window.location.href = "/dashboard/";
+      } catch (err) {
+        showFieldErrors(form, err);
+        setBusy(button, false);
+      } finally {
+        clearTimeout(wakeTimer);
+        wakeHint.classList.add("hidden");
+      }
+    });
+
+    // ------------------------------------------------------------------
+    // System status (App / Server / Database), shown before the user acts
+    // ------------------------------------------------------------------
+    const statusMsg = document.getElementById("status-msg");
+    const statusRetry = document.getElementById("status-retry");
+
+    /** Set one dot: state is "ok", "bad" or "wait". */
+    function setDot(key, state) {
+      document.getElementById("dot-" + key).className = "status-dot " + state;
+    }
+
+    /** Set the guidance line under the dots. tone: "" | "ok" | "warn" | "bad". */
+    function setStatusMessage(text, tone = "") {
+      statusMsg.textContent = text;
+      statusMsg.className = "mt-2 text-xs " + ({ ok: "text-ok", warn: "text-warn", bad: "text-danger" }[tone] || "text-muted");
+    }
+
+    /** Ping /health/ then /health/db/ and tell the user what to do next. */
+    async function checkSystem() {
+      statusRetry.classList.add("hidden");
+      setDot("backend", "wait");
+      setDot("database", "wait");
+      setStatusMessage("Checking the server...");
+      // The free server sleeps when idle. Explain the wait instead of leaving a blank screen.
+      const wakeTimer = setTimeout(() =>
+        setStatusMessage("The server is waking up. This can take up to a minute. Please wait before logging in.", "warn"), 3000);
+
+      try {
+        await apiRequest("/health/", { auth: false });
+        setDot("backend", "ok");
+      } catch {
+        clearTimeout(wakeTimer);
+        setDot("backend", "bad");
+        setDot("database", "bad");
+        setStatusMessage("The server is not reachable. Check your internet connection and try again in a moment.", "bad");
+        statusRetry.classList.remove("hidden");
+        return;
+      }
+      try {
+        await apiRequest("/health/db/", { auth: false });
+        clearTimeout(wakeTimer);
+        setDot("database", "ok");
+        setStatusMessage("All systems online. You are good to go.", "ok");
+      } catch {
+        clearTimeout(wakeTimer);
+        setDot("database", "bad");
+        setStatusMessage("The database is unavailable right now. Please try again in a few minutes.", "bad");
+        statusRetry.classList.remove("hidden");
+      }
+    }
+
+    statusRetry.addEventListener("click", checkSystem);
+    checkSystem();
+  </script>
 </body>
 </html>

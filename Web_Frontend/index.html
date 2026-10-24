@@ -1,77 +1,248 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="scroll-smooth">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Velocity | GST Billing</title>
+  <meta name="description" content="GST billing, inventory and accounting for growing businesses." />
+  <script>document.documentElement.classList.add("js");</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/shared/css/theme.css" />
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="/shared/js/tailwind-config.js"></script>
 </head>
-<body class="min-h-screen bg-navy">
-  <main class="mx-auto max-w-xl px-4 py-16">
-    <h1 class="text-4xl font-bold text-white">Velocity</h1>
-    <div class="speed-bar mt-3 w-24 rounded"></div>
-    <p class="mt-4 text-white/70">GST billing, inventory and accounting for growing businesses.</p>
+<body>
 
-    <div class="mt-6 flex gap-3">
-      <a href="/auth/login.html" class="btn btn-primary">Log in</a>
-      <a href="/auth/register.html" class="btn border border-glow text-glow">Create account</a>
+  <!-- Sticky header: transparent on top, dark glass after scrolling -->
+  <header id="site-header" class="site-header">
+    <div class="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6">
+      <a href="/" class="brand" aria-label="Velocity home"><span class="brand-mark">V</span> Velocity</a>
+      <nav class="flex items-center gap-1" aria-label="Main">
+        <a href="#features" class="site-link hidden sm:inline-block">Features</a>
+        <a href="#how" class="site-link hidden sm:inline-block">How it works</a>
+        <a href="#gst" class="site-link hidden md:inline-block">GST</a>
+        <a id="nav-login" href="/auth/login.html" class="site-link">Log in</a>
+        <a id="nav-cta" href="/auth/register.html" class="btn btn-primary btn-sm ml-1">Get started</a>
+      </nav>
     </div>
+  </header>
 
-    <section class="card mt-10">
-      <h2 class="text-sm font-semibold uppercase tracking-wide text-muted">System status</h2>
-      <ul class="mt-3 divide-y divide-slate-200">
-        <li class="flex items-center justify-between py-3">
-          <span>Frontend (Vercel)</span>
-          <span class="text-sm font-medium text-green-600">Online</span>
-        </li>
-        <li class="flex items-center justify-between py-3">
-          <span>Backend (Render)</span>
-          <span id="status-backend" class="text-sm font-medium text-muted">Checking...</span>
-        </li>
-        <li class="flex items-center justify-between py-3">
-          <span>Database (Neon)</span>
-          <span id="status-database" class="text-sm font-medium text-muted">Checking...</span>
-        </li>
-      </ul>
-      <p id="wake-note" class="mt-3 hidden text-sm text-amber-600">
-        The free backend may be waking up. This can take up to a minute.
-      </p>
+  <main>
+    <!-- Hero -->
+    <section class="hero">
+      <div class="blob blob-blue" style="width:34rem;height:34rem;top:-12rem;left:-10rem"></div>
+      <div class="blob blob-cyan" style="width:28rem;height:28rem;top:6rem;right:-8rem;animation-delay:-6s"></div>
+      <div class="slash" style="top:30%;left:0"></div>
+      <div class="slash" style="top:62%;left:0;animation-delay:-3s;width:30%"></div>
+
+      <div class="mx-auto grid max-w-7xl items-center gap-12 px-4 pb-20 pt-32 sm:px-6 lg:grid-cols-2 lg:pb-28 lg:pt-40">
+        <div>
+          <span class="pill-dot-wrap reveal pill-dark"><span class="pill-dot"></span> Built for Indian GST</span>
+          <h1 class="reveal mt-6 text-5xl font-extrabold tracking-tight md:text-6xl" style="--d:1">
+            Bill at the <span class="text-gradient">speed of business.</span>
+          </h1>
+          <p class="reveal mt-5 max-w-xl text-lg text-white/70" style="--d:2">
+            GST invoices, stock, payments and returns in one fast workspace. Create a tax-ready invoice in seconds, not minutes.
+          </p>
+          <div class="reveal mt-8 flex flex-wrap gap-3" style="--d:3">
+            <a href="/auth/register.html" class="btn btn-primary btn-lg btn-glow">Start free
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+            </a>
+            <a href="#features" class="btn btn-ghost-dark btn-lg">See what's inside</a>
+          </div>
+          <p class="reveal mt-5 text-sm text-white/50" style="--d:4">No card needed. Set up your business in under two minutes.</p>
+        </div>
+
+        <!-- Product mock: sample numbers only, not real data -->
+        <div class="reveal relative mx-auto w-full max-w-md" style="--d:3" aria-hidden="true">
+          <div class="glass float-slow p-5">
+            <div class="flex items-center justify-between">
+              <div>
+                <p class="text-xs uppercase tracking-wider text-white/50">Tax invoice</p>
+                <p class="font-semibold">INV-0142</p>
+              </div>
+              <span class="rounded-full bg-emerald-400/15 px-3 py-1 text-xs font-semibold text-emerald-300">Paid</span>
+            </div>
+            <div class="mt-4 space-y-2 text-sm">
+              <div class="flex justify-between text-white/70"><span>Sunrise Traders</span><span>3 items</span></div>
+              <div class="flex justify-between text-white/70"><span>Taxable value</span><span class="amount">₹ 42,500.00</span></div>
+              <div class="flex justify-between text-white/70"><span>CGST 9% + SGST 9%</span><span class="amount">₹ 7,650.00</span></div>
+            </div>
+            <div class="mt-4 flex items-end justify-between border-t border-white/10 pt-4">
+              <span class="text-sm text-white/60">Total</span>
+              <span class="amount text-3xl font-extrabold">₹ 50,150</span>
+            </div>
+            <div class="speed-bar mt-4 rounded"></div>
+          </div>
+          <div class="glass absolute -bottom-6 -left-4 hidden px-4 py-3 sm:block" style="animation: float-slow 6s ease-in-out infinite; animation-delay:-2s">
+            <p class="text-xs text-white/50">GSTR-1</p>
+            <p class="text-sm font-semibold text-emerald-300">Ready to file</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Trust strip -->
+    <section class="border-b border-line bg-white">
+      <div class="mx-auto grid max-w-7xl grid-cols-2 gap-6 px-4 py-8 text-center sm:px-6 md:grid-cols-4">
+        <div class="reveal"><p class="text-2xl font-extrabold">CGST · SGST · IGST</p><p class="text-sm text-muted">Applied automatically</p></div>
+        <div class="reveal" style="--d:1"><p class="text-2xl font-extrabold">GSTR-1 ready</p><p class="text-sm text-muted">Reports from your invoices</p></div>
+        <div class="reveal" style="--d:2"><p class="text-2xl font-extrabold">HSN / SAC</p><p class="text-sm text-muted">Validated on every line</p></div>
+        <div class="reveal" style="--d:3"><p class="text-2xl font-extrabold">₹ Indian format</p><p class="text-sm text-muted">1,23,456.78 everywhere</p></div>
+      </div>
+    </section>
+
+    <!-- Features -->
+    <section id="features" class="mx-auto max-w-7xl px-4 py-20 sm:px-6">
+      <div class="reveal mx-auto max-w-2xl text-center">
+        <p class="text-xs font-semibold uppercase tracking-wider text-brand">Everything in one place</p>
+        <h2 class="mt-2 text-3xl font-bold tracking-tight md:text-4xl">Run the whole counter from one screen</h2>
+        <p class="mt-3 text-muted">From the first quotation to the filed return, Velocity keeps your numbers connected.</p>
+      </div>
+
+      <div class="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        <article class="card card-hover reveal">
+          <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h8l4 4v14H7z"/><path d="M15 3v4h4M10 12h6M10 16h6"/></svg></div>
+          <h3 class="mt-4 text-lg font-semibold">GST invoicing</h3>
+          <p class="mt-1 text-sm text-muted">Tax invoices and bills of supply with the right CGST, SGST or IGST worked out from the place of supply.</p>
+        </article>
+        <article class="card card-hover reveal" style="--d:1">
+          <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8M12 13v8"/></svg></div>
+          <h3 class="mt-4 text-lg font-semibold">Inventory</h3>
+          <p class="mt-1 text-sm text-muted">Stock moves with every sale and purchase. You choose whether short stock is allowed or blocked.</p>
+        </article>
+        <article class="card card-hover reveal" style="--d:2">
+          <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.5 3.2-5.5 6.5-5.5s5.9 2 6.5 5.5M16 4.5a3.5 3.5 0 010 7M18 14.8c2 .6 3.2 2.3 3.5 5.2"/></svg></div>
+          <h3 class="mt-4 text-lg font-semibold">Parties</h3>
+          <p class="mt-1 text-sm text-muted">Customers and suppliers with GSTIN, balances and history, ready to pick while billing.</p>
+        </article>
+        <article class="card card-hover reveal">
+          <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M7 15h3"/></svg></div>
+          <h3 class="mt-4 text-lg font-semibold">Payments</h3>
+          <p class="mt-1 text-sm text-muted">Record what you receive and pay, and see who owes what at a glance.</p>
+        </article>
+        <article class="card card-hover reveal" style="--d:1">
+          <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg></div>
+          <h3 class="mt-4 text-lg font-semibold">GSTR reports</h3>
+          <p class="mt-1 text-sm text-muted">Return-ready figures built from your invoices, so month-end is a review, not a rebuild.</p>
+        </article>
+        <article class="card card-hover reveal" style="--d:2">
+          <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg></div>
+          <h3 class="mt-4 text-lg font-semibold">Books lock</h3>
+          <p class="mt-1 text-sm text-muted">Lock filed months so nobody can change an invoice after the return has gone out.</p>
+        </article>
+      </div>
+    </section>
+
+    <!-- How it works -->
+    <section id="how" class="border-y border-line bg-white">
+      <div class="mx-auto max-w-7xl px-4 py-20 sm:px-6">
+        <div class="reveal mx-auto max-w-2xl text-center">
+          <p class="text-xs font-semibold uppercase tracking-wider text-brand">How it works</p>
+          <h2 class="mt-2 text-3xl font-bold tracking-tight md:text-4xl">Up and billing in three steps</h2>
+        </div>
+        <ol class="mt-12 grid gap-8 md:grid-cols-3">
+          <li class="reveal text-center"><div class="step-num mx-auto">1</div><h3 class="mt-4 text-lg font-semibold">Create your account</h3><p class="mt-1 text-sm text-muted">Just your business name, email and a password.</p></li>
+          <li class="reveal text-center" style="--d:1"><div class="step-num mx-auto">2</div><h3 class="mt-4 text-lg font-semibold">Add business details</h3><p class="mt-1 text-sm text-muted">GSTIN, address and state, so the tax is right from invoice one.</p></li>
+          <li class="reveal text-center" style="--d:2"><div class="step-num mx-auto">3</div><h3 class="mt-4 text-lg font-semibold">Start billing</h3><p class="mt-1 text-sm text-muted">Add items and parties, issue invoices, track payments.</p></li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- GST highlight band -->
+    <section id="gst" class="mx-auto max-w-7xl px-4 py-20 sm:px-6">
+      <div class="hero reveal rounded-2xl px-6 py-14 text-center sm:px-12">
+        <div class="blob blob-blue" style="width:22rem;height:22rem;top:-8rem;left:-6rem"></div>
+        <div class="blob blob-cyan" style="width:20rem;height:20rem;bottom:-9rem;right:-5rem;animation-delay:-5s"></div>
+        <h2 class="mx-auto max-w-2xl text-3xl font-bold tracking-tight md:text-4xl">GST that does not need a calculator</h2>
+        <p class="mx-auto mt-3 max-w-xl text-white/70">Same state means CGST + SGST. Different state means IGST. Velocity reads your state and your customer's, and does the rest.</p>
+        <div class="mt-8 grid gap-4 text-left sm:grid-cols-3">
+          <div class="glass p-4"><p class="text-xs uppercase tracking-wider text-white/50">Same state</p><p class="mt-1 font-semibold">CGST + SGST</p></div>
+          <div class="glass p-4"><p class="text-xs uppercase tracking-wider text-white/50">Other state</p><p class="mt-1 font-semibold">IGST</p></div>
+          <div class="glass p-4"><p class="text-xs uppercase tracking-wider text-white/50">Unregistered</p><p class="mt-1 font-semibold">Bill of Supply</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Final call to action -->
+    <section class="mx-auto max-w-3xl px-4 pb-24 text-center sm:px-6">
+      <h2 class="reveal text-3xl font-bold tracking-tight md:text-4xl">Ready to move faster?</h2>
+      <p class="reveal mt-3 text-muted" style="--d:1">Create your account and send your first invoice today.</p>
+      <div class="reveal mt-7 flex flex-wrap justify-center gap-3" style="--d:2">
+        <a href="/auth/register.html" class="btn btn-primary btn-lg btn-glow">Create free account</a>
+        <a href="/auth/login.html" class="btn btn-ghost btn-lg">Log in</a>
+      </div>
     </section>
   </main>
 
+  <!-- Footer with live system status -->
+  <footer class="bg-navy text-white/70">
+    <div class="speed-bar"></div>
+    <div class="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 px-4 py-8 text-sm sm:flex-row sm:px-6">
+      <div class="flex items-center gap-2"><span class="brand-mark">V</span><span class="font-semibold text-white">Velocity</span><span class="text-white/50">GST billing</span></div>
+      <div class="flex flex-wrap items-center justify-center gap-x-5 gap-y-2" aria-label="System status">
+        <span class="flex items-center gap-2"><span class="status-dot ok"></span> App</span>
+        <span class="flex items-center gap-2"><span id="dot-backend" class="status-dot wait"></span> <span id="status-backend">Server: checking</span></span>
+        <span class="flex items-center gap-2"><span id="dot-database" class="status-dot wait"></span> <span id="status-database">Database: checking</span></span>
+      </div>
+    </div>
+    <p id="wake-note" class="hidden px-4 pb-6 text-center text-xs text-amber-300">The free server may be waking up. This can take up to a minute.</p>
+  </footer>
+
   <script src="/shared/js/config.js"></script>
   <script src="/shared/js/api.js"></script>
+  <script src="/shared/js/ui.js"></script>
   <script>
-    /** Update a status label. textContent only (XSS-safe). */
-    function setStatus(id, ok, text) {
-      const el = document.getElementById(id);
-      el.textContent = text;
-      el.className = "text-sm font-medium " + (ok ? "text-green-600" : "text-red-600");
+    /** Turn the header into dark glass once the page is scrolled. */
+    function initHeader() {
+      const header = document.getElementById("site-header");
+      const update = () => header.classList.toggle("scrolled", window.scrollY > 24);
+      update();
+      window.addEventListener("scroll", update, { passive: true });
     }
 
+    /** Logged-in visitors get a shortcut to the dashboard instead of login/register. */
+    function personaliseHeader() {
+      if (!Auth.isLoggedIn()) return;
+      document.getElementById("nav-login").classList.add("hidden");
+      const cta = document.getElementById("nav-cta");
+      cta.textContent = "Open dashboard";
+      cta.href = "/dashboard/";
+    }
+
+    /** Update one status label and its dot. textContent only (XSS-safe). */
+    function setStatus(key, ok, text) {
+      document.getElementById("status-" + key).textContent = text;
+      document.getElementById("dot-" + key).className = "status-dot " + (ok ? "ok" : "bad");
+    }
+
+    /** Ping /health/ then /health/db/ and show the result in the footer. */
     async function checkSystem() {
       const note = document.getElementById("wake-note");
       const timer = setTimeout(() => note.classList.remove("hidden"), 3000);
       try {
         await apiRequest("/health/", { auth: false });
-        setStatus("status-backend", true, "Online");
+        setStatus("backend", true, "Server: online");
       } catch {
-        setStatus("status-backend", false, "Unreachable (check CORS and URL)");
-        setStatus("status-database", false, "Not checked");
+        setStatus("backend", false, "Server: unreachable");
+        setStatus("database", false, "Database: not checked");
         clearTimeout(timer);
         return;
       }
       try {
         await apiRequest("/health/db/", { auth: false });
-        setStatus("status-database", true, "Connected");
+        setStatus("database", true, "Database: connected");
       } catch {
-        setStatus("status-database", false, "Unavailable");
+        setStatus("database", false, "Database: unavailable");
       }
       clearTimeout(timer);
       note.classList.add("hidden");
     }
+
+    initHeader();
+    personaliseHeader();
+    initReveal();
     checkSystem();
   </script>
 </body>

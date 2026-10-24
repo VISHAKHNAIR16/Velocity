@@ -1,7 +1,7 @@
 /**
- * Shared UI helpers. Requires api.js to be loaded first.
+ * Shared UI helpers (v2 revamp). Requires api.js to be loaded first.
  * Security rule: user-supplied text is only ever written with textContent / .value,
- * never innerHTML.
+ * never innerHTML. innerHTML below is used for STATIC markup only.
  */
 
 // ===================================================================
@@ -16,7 +16,6 @@
  *   h("div", childNode, [more, children])
  *
  * NOTE: an options object must be the SECOND argument, before any children.
- * Attribute support matters: without it a cell silently renders empty.
  */
 function h(tag, ...children) {
   const el = document.createElement(tag);
@@ -96,11 +95,16 @@ function initials(name) {
   return (first + last).toUpperCase();
 }
 
-/** Clear all field errors and the top message inside a form. */
+// ===================================================================
+// Form helpers
+// ===================================================================
+
+/** Clear all field errors, invalid highlights and the top message inside a form. */
 function clearErrors(form) {
   form.querySelectorAll("[data-error-for]").forEach((el) => { el.textContent = ""; });
+  form.querySelectorAll(".is-invalid").forEach((el) => el.classList.remove("is-invalid"));
   const box = form.querySelector("[data-form-message]");
-  if (box) { box.textContent = ""; box.classList.add("hidden"); }
+  if (box) { box.textContent = ""; box.className = "hidden"; }
 }
 
 /** Show a message at the top of a form. kind: "error" | "success". */
@@ -108,8 +112,8 @@ function showFormMessage(form, text, kind = "error") {
   const box = form.querySelector("[data-form-message]");
   if (!box) return;
   box.textContent = text;
-  box.className = "rounded p-3 text-sm " +
-    (kind === "success" ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700");
+  box.className = "alert " + (kind === "success" ? "alert-success" : "alert-error");
+  box.setAttribute("role", kind === "success" ? "status" : "alert");
 }
 
 /** Put each backend field error under its input; anything else goes in the top message. */
@@ -118,17 +122,36 @@ function showFieldErrors(form, err) {
   for (const [field, msgs] of Object.entries(err.errors || {})) {
     const text = Array.isArray(msgs) ? msgs.join(" ") : String(msgs);
     const el = form.querySelector(`[data-error-for="${field}"]`);
-    if (el) el.textContent = text; else unmatched.push(text);
+    if (el) {
+      el.textContent = text;
+      const input = form.elements[field];
+      if (input && input.classList) input.classList.add("is-invalid");
+    } else {
+      unmatched.push(text);
+    }
   }
   showFormMessage(form, unmatched.length ? unmatched.join(" ") : err.message);
 }
 
+/** Remembers a button's original children so setBusy can restore icons too. */
+const _busyOriginal = new WeakMap();
+
 /** Disable a button while a request runs, so it cannot be double-submitted. */
 function setBusy(button, busy, busyLabel = "Please wait...") {
-  if (busy) { button.dataset.label = button.textContent; button.textContent = busyLabel; }
-  else { button.textContent = button.dataset.label || button.textContent; }
+  if (busy) {
+    _busyOriginal.set(button, Array.from(button.childNodes));
+    button.textContent = busyLabel;
+  } else if (_busyOriginal.has(button)) {
+    button.replaceChildren(..._busyOriginal.get(button));
+    _busyOriginal.delete(button);
+  }
   button.disabled = busy;
+  button.setAttribute("aria-busy", busy ? "true" : "false");
 }
+
+// ===================================================================
+// Session helpers
+// ===================================================================
 
 /** Send logged-out visitors to the login page. Returns false if redirected. */
 function requireLogin() {
@@ -141,12 +164,17 @@ function redirectIfLoggedIn() {
   if (Auth.isLoggedIn()) window.location.href = "/dashboard/";
 }
 
-/** Toast notification stack (bottom-right). */
+// ===================================================================
+// Feedback + page effects
+// ===================================================================
+
+/** Toast notification stack (bottom-right). kind: success | error | warning. */
 function showToast(message, kind = "success") {
   let stack = document.querySelector(".toast-stack");
   if (!stack) {
     stack = document.createElement("div");
     stack.className = "toast-stack";
+    stack.setAttribute("aria-live", "polite");
     document.body.append(stack);
   }
   const toast = document.createElement("div");
@@ -156,31 +184,74 @@ function showToast(message, kind = "success") {
   setTimeout(() => toast.remove(), 4000);
 }
 
-/** Draw the top navigation bar into <header id="nav" class="bg-navy">. Static markup only. */
+/**
+ * Fade elements in as they scroll into view.
+ * Mark elements with class "reveal" (optionally style="--d:2" for a stagger step).
+ * Without JS the elements stay visible because theme.css only hides them under html.js.
+ */
+function initReveal() {
+  const items = document.querySelectorAll(".reveal");
+  if (!("IntersectionObserver" in window)) { items.forEach((el) => el.classList.add("in")); return; }
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (entry.isIntersecting) { entry.target.classList.add("in"); observer.unobserve(entry.target); }
+    });
+  }, { threshold: 0.12 });
+  items.forEach((el) => observer.observe(el));
+}
+
+// ===================================================================
+// Top navigation (app pages)
+// ===================================================================
+
+/** Menu entries: [href, label, key]. Add a new page here once and every page gets it. */
+const NAV_ITEMS = [
+  ["/dashboard/", "Dashboard", "dashboard"],
+  ["/payments/index.html", "Payments", "payments"],
+  ["/parties/index.html", "Parties", "parties"],
+  ["/items/index.html", "Items", "items"],
+  ["/invoices/index.html", "Invoices", "invoices"],
+  ["/purchases/index.html", "Purchases", "purchases"],
+  ["/expenses/index.html", "Expenses", "expenses"],
+  ["/quotations/index.html", "Quotations", "quotations"],
+  ["/gstr/index.html", "GSTR Reports", "gstr"],
+  ["/business/profile.html", "Business", "profile"],
+];
+
+/**
+ * Draw the light, sticky top bar into <header id="nav">.
+ * Static markup only (no user data). On screens narrower than 1280px the links
+ * collapse behind a menu button.
+ */
 function renderNav(active) {
-  const link = (href, label, key) =>
-    `<a href="${href}" class="px-3 py-2 rounded-lg text-sm font-medium transition-colors ${key === active ? "bg-white/10 text-white" : "text-white/80 hover:text-white hover:bg-white/5"}">${label}</a>`;
-  document.getElementById("nav").innerHTML = `
-    <div class="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
-      <a href="/dashboard/" class="flex items-center gap-2 text-lg font-bold text-white" aria-label="Velocity Home">
-        <span class="w-8 h-8 rounded-lg flex items-center justify-center text-sm" style="background: linear-gradient(135deg, var(--brand), var(--velocity));">V</span>
-        Velocity
+  const header = document.getElementById("nav");
+  header.className = "app-nav"; // overrides any old "bg-navy" class on the header
+
+  const links = NAV_ITEMS.map(([href, label, key]) =>
+    `<a href="${href}" class="nav-link${key === active ? " active" : ""}"${key === active ? ' aria-current="page"' : ""}>${label}</a>`
+  ).join("");
+
+  header.innerHTML = `
+    <div class="app-nav-inner">
+      <a href="/dashboard/" class="brand" aria-label="Velocity home">
+        <span class="brand-mark">V</span> Velocity
       </a>
-      <nav class="flex items-center gap-1" aria-label="Main navigation">
-        ${link("/dashboard/", "Dashboard", "dashboard")}
-        ${link("/payments/index.html", "Payments", "payments")}
-        ${link("/parties/index.html", "Parties", "parties")}
-        ${link("/items/index.html", "Items", "items")}
-        ${link("/invoices/index.html", "Invoices", "invoices")}
-        ${link("/purchases/index.html", "Purchases", "purchases")}
-        ${link("/expenses/index.html", "Expenses", "expenses")}
-        ${link("/quotations/index.html", "Quotations", "quotations")}
-        ${link("/gstr/index.html", "GSTR Reports", "gstr")}
-        ${link("/business/profile.html", "Business", "profile")}
-        <button id="logout-btn" class="px-3 py-2 rounded-lg text-sm font-medium text-white/80 hover:text-white hover:bg-white/5 transition-colors" aria-label="Log out">Log out</button>
+      <button type="button" id="nav-toggle" class="icon-btn nav-toggle" aria-label="Open menu" aria-expanded="false" aria-controls="nav-links">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+      <nav id="nav-links" class="nav-links" aria-label="Main navigation">
+        ${links}
+        <button type="button" id="logout-btn" class="nav-link" aria-label="Log out">Log out</button>
       </nav>
     </div>
     <div class="speed-bar"></div>`;
+
+  const toggle = document.getElementById("nav-toggle");
+  const panel = document.getElementById("nav-links");
+  toggle.addEventListener("click", () => {
+    const open = panel.classList.toggle("open");
+    toggle.setAttribute("aria-expanded", String(open));
+  });
   document.getElementById("logout-btn").addEventListener("click", () => {
     Auth.clear();
     window.location.href = "/auth/login.html";

@@ -4,51 +4,428 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Business profile | Velocity</title>
+  <script>document.documentElement.classList.add("js");</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/shared/css/theme.css" />
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="/shared/js/tailwind-config.js"></script>
 </head>
 <body class="min-h-screen">
-  <header id="nav" class="bg-navy"></header>
+  <header id="nav"></header>
 
-  <main class="mx-auto max-w-3xl px-4 py-10">
-    <h1 class="text-2xl font-bold">Business profile</h1>
-    <p class="mt-1 text-sm text-muted">These details appear on your invoices.</p>
+  <main class="mx-auto max-w-6xl px-4 py-8 sm:px-6">
 
-    <div id="setup-banner" class="mt-4 hidden rounded border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800">
-      Add your address and state to start invoicing. The state decides whether CGST+SGST or IGST is charged.
+    <!-- Page header + completeness -->
+    <div class="reveal in card">
+      <div class="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 class="text-2xl font-bold tracking-tight">Business profile</h1>
+          <p class="mt-1 text-sm text-muted">These details appear on your invoices.</p>
+        </div>
+        <p class="text-sm font-semibold"><span id="progress-text">0%</span> <span class="font-normal text-muted">complete</span></p>
+      </div>
+      <div class="progress mt-4" role="progressbar" aria-label="Profile completeness" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progress-bar">
+        <span id="progress-fill"></span>
+      </div>
+      <div id="setup-banner" class="note-warn hidden" style="font-size:0.8125rem">
+        Add your address and state to start invoicing. The state decides whether CGST+SGST or IGST is charged.
+      </div>
     </div>
 
-    <form id="profile-form" class="mt-6 space-y-8" novalidate>
-      <p data-form-message class="hidden"></p>
+    <div class="profile-layout mt-6">
 
-            <section class="card">
-        <h2 class="font-semibold">Logo</h2>
-        <div class="mt-3 flex items-center gap-5">
-          <div class="flex h-24 w-24 items-center justify-center overflow-hidden rounded-lg border border-dashed border-slate-300 bg-slate-50">
-            <img id="logo-preview" alt="Business logo" class="hidden h-full w-full object-contain" />
-            <span id="logo-placeholder" class="text-xs text-muted">No logo</span>
+      <!-- Section menu (sticky on desktop, scrolling row on mobile) -->
+      <nav id="side-menu" class="side-menu" aria-label="Profile sections"></nav>
+
+      <!-- Form -->
+      <form id="profile-form" class="space-y-6" novalidate>
+        <p data-form-message class="hidden"></p>
+
+        <!-- Logo -->
+        <section id="sec-logo" class="card" data-menu="Logo">
+          <h2 class="font-semibold">Logo</h2>
+          <div class="mt-4 flex flex-wrap items-center gap-5">
+            <div class="flex h-24 w-24 items-center justify-center overflow-hidden rounded-xl border border-dashed border-slate-300 bg-tint">
+              <img id="logo-preview" alt="Business logo" class="hidden h-full w-full object-contain" />
+              <span id="logo-placeholder" class="px-2 text-center text-xs text-muted">No logo yet</span>
+            </div>
+            <div>
+              <input id="logo-file" type="file" accept="image/png,image/jpeg,image/webp" class="hidden" />
+              <button type="button" id="logo-choose" class="btn btn-outline">Upload logo</button>
+              <button type="button" id="logo-remove" class="ml-2 hidden text-sm text-muted underline">Remove</button>
+              <p class="hint">PNG, JPG or WebP, up to 2 MB.</p>
+              <p id="logo-message" class="mt-1 text-sm" role="status"></p>
+            </div>
           </div>
-          <div>
-            <input id="logo-file" type="file" accept="image/png,image/jpeg,image/webp" class="hidden" />
-            <button type="button" id="logo-choose" class="btn btn-outline">Upload logo</button>
-            <button type="button" id="logo-remove" class="ml-2 hidden text-sm text-muted underline">Remove</button>
-            <p class="hint">PNG, JPG or WebP, up to 2 MB.</p>
-            <p id="logo-message" class="mt-1 text-sm"></p>
-          </div>
+        </section>
+
+        <!-- Generated sections (business, address, bank, invoice preferences) -->
+        <div id="sections" class="space-y-6"></div>
+
+        <!-- Sticky save bar -->
+        <div class="save-bar">
+          <p class="text-sm text-muted">Changes are saved when you press the button.</p>
+          <button type="submit" class="btn btn-primary btn-glow">Save &amp; Update</button>
         </div>
-      </section>
-
-      <div id="sections" class="space-y-8"></div>
-
-      <button type="submit" class="btn btn-primary">Save &amp; Update</button>
-    </form>
+      </form>
+    </div>
   </main>
 
   <script src="/shared/js/config.js"></script>
   <script src="/shared/js/api.js"></script>
   <script src="/shared/js/ui.js"></script>
-  <script src="/business/logo.js"></script>
-  <script src="/business/profile.js"></script>
+  <script>
+    /**
+     * Business profile page. Backend contract unchanged:
+     *   GET/PUT /business/profile/, PUT/DELETE /business/logo/, GET /meta/states/
+     */
+
+    // ------------------------------------------------------------------
+    // Form layout. To add a field later, add one line here (and the backend field).
+    // ------------------------------------------------------------------
+    const SECTIONS = [
+      { title: "Business details", fields: [
+        { name: "trade_name", label: "Trade / brand name", required: true },
+        { name: "company_name", label: "Company name (legal)", required: true },
+        { name: "owner_name", label: "Owner name" },
+        { name: "phone", label: "Company phone", type: "tel", maxlength: 10, hint: "10-digit mobile number" },
+        { name: "alternate_phone", label: "Alternative contact number", type: "tel", maxlength: 15 },
+        { name: "email", label: "Company email", type: "email" },
+        { name: "website", label: "Website", placeholder: "www.example.com" },
+        { name: "gstin", label: "GSTIN", maxlength: 15, upper: true, placeholder: "36ABCCS2942R1ZR" },
+        { name: "pan", label: "PAN number", maxlength: 10, upper: true },
+      ]},
+      { title: "Billing address", fields: [
+        { name: "address_line", label: "Address", wide: true },
+        { name: "city", label: "City" },
+        { name: "state_code", label: "State", type: "select", placeholder: "Select state" },
+        { name: "pincode", label: "Pincode", maxlength: 6 },
+      ]},
+      { title: "Bank details", fields: [
+        { name: "bank_account_name", label: "Account holder name" },
+        { name: "bank_account_number", label: "Account number", maxlength: 18 },
+        { name: "bank_ifsc", label: "IFSC code", maxlength: 11, upper: true },
+        { name: "bank_name", label: "Bank name" },
+        { name: "bank_branch", label: "Branch" },
+      ]},
+      { title: "Invoice preferences", intro: "How your invoices are numbered and what they must contain.", fields: [
+        {
+          name: "gst_registration_type", label: "GST registration", type: "select",
+          options: [
+            ["REGULAR", "Regular - I am registered and charge GST"],
+            ["UNREGISTERED", "Unregistered - I issue a Bill of Supply, no GST"],
+            ["COMPOSITE", "Composition scheme"],
+          ],
+          hint: "An unregistered business issues a Bill of Supply and never charges GST.",
+          wide: true,
+        },
+        {
+          name: "invoice_number_prefix", label: "Invoice number prefix", maxlength: 4, upper: true,
+          placeholder: "INV",
+          hint: "1-4 letters or digits. Locked in for the whole financial year once you issue your first invoice, so the series always looks consistent.",
+        },
+        {
+          name: "hsn_min_digits", label: "HSN / SAC digits required", type: "select",
+          options: [
+            ["4", "4 digits - annual turnover up to ₹5 crore"],
+            ["6", "6 digits - annual turnover above ₹5 crore"],
+          ],
+          hint: "Every line of every tax invoice needs an HSN/SAC code, and your GSTR-1 asks for a number of digits based on your turnover. 4 digits up to ₹5 crore, 6 above.",
+          warning: "If you are unsure which applies, leave this at 4 and ask your accountant. A missing digit is harder to fix after filing than an extra one.",
+        },
+        {
+          name: "books_locked_until", label: "Lock books up to", type: "date",
+          hint: "Set this to the last day of the month whose GSTR-1 you have already filed.",
+          warning: "Invoices dated on or before this day cannot be created, issued or cancelled. That is the point - the sanctioned way to fix a filed period is a credit note dated after this date.",
+        },
+        {
+          name: "negative_stock_policy", label: "When stock is short", type: "select",
+          options: [
+            ["ALLOW", "Allow it - issue the invoice and go negative"],
+            ["BLOCK", "Block it - refuse the invoice"],
+          ],
+          hint: "Decides what happens when an invoice sells more than you have in stock.",
+          warning: "Most shops' opening stock is wrong on day one, so ALLOW is the default: a billing app that refuses to bill leaves a customer waiting at the counter and pushes you back to a paper bill. Choose BLOCK if you would rather stop and count. Either way every movement is recorded, and you can correct the count with Adjust Stock.",
+          wide: true,
+        },
+        {
+          name: "round_invoice_total", label: "Round the invoice total", type: "checkbox", wide: true,
+          hint: "Adds a 'Round Off' row so the payable amount is a whole rupee.",
+          warning: "Presentation only. This does not change taxable values, CGST/SGST/IGST, or your GSTR-1 figures - only the amount the customer pays.",
+        },
+      ]},
+    ];
+    const ALL_FIELDS = SECTIONS.flatMap((s) => s.fields);
+    // Checkbox values are booleans, not strings: collect them from the DOM instead.
+    const TEXT_FIELDS = ALL_FIELDS.filter((f) => f.type !== "checkbox");
+    const CHECK_FIELDS = ALL_FIELDS.filter((f) => f.type === "checkbox");
+
+    // Fields that count toward the completeness bar (the ones invoices really need).
+    const KEY_FIELDS = [
+      "trade_name", "company_name", "phone", "email", "gstin",
+      "address_line", "city", "state_code", "pincode",
+      "bank_account_number", "bank_ifsc",
+    ];
+
+    const form = document.getElementById("profile-form");
+    const saveButton = form.querySelector("button[type=submit]");
+
+    // ------------------------------------------------------------------
+    // Builders
+    // ------------------------------------------------------------------
+
+    /** Create a small element with optional class and text. */
+    function el(tag, className, text) {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (text) node.textContent = text;
+      return node;
+    }
+
+    /** A caution note under a setting whose consequences are easy to underestimate. */
+    function buildWarning(text) {
+      return el("p", "note-warn", text);
+    }
+
+    /** Build one label + input/select/checkbox + hint/warning + error line. */
+    function buildField(f) {
+      const wrap = el("div", f.wide || f.type === "checkbox" ? "sm:col-span-2" : "");
+
+      // Checkbox: label sits beside the box, and the hint/warning sit under both.
+      if (f.type === "checkbox") {
+        const row = el("div", "flex items-start gap-2.5");
+        const input = el("input", "checkbox");
+        input.type = "checkbox";
+        input.id = f.name;
+        input.name = f.name;
+        const label = el("label", "text-sm font-medium text-navy", f.label);
+        label.htmlFor = f.name;
+        row.append(input, label);
+        wrap.append(row);
+        if (f.hint) wrap.append(el("p", "hint", f.hint));
+        if (f.warning) wrap.append(buildWarning(f.warning));
+        const boxError = el("p", "field-error");
+        boxError.dataset.errorFor = f.name;
+        wrap.append(boxError);
+        return wrap;
+      }
+
+      const label = el("label", "label", f.label + (f.required ? " *" : ""));
+      label.htmlFor = f.name;
+
+      const input = f.type === "select" ? el("select", "input") : el("input", "input");
+      input.id = f.name;
+      input.name = f.name;
+      if (f.type === "select") {
+        input.append(new Option(f.placeholder || "Select", ""));
+        (f.options || []).forEach(([value, text]) => input.append(new Option(text, value)));
+      } else {
+        input.type = f.type || "text";
+        if (f.maxlength) input.maxLength = f.maxlength;
+        if (f.placeholder) input.placeholder = f.placeholder;
+        if (f.upper) input.classList.add("input-upper"); // display only; the backend stores upper case
+      }
+
+      wrap.append(label, input);
+      if (f.hint) wrap.append(el("p", "hint", f.hint));
+      if (f.warning) wrap.append(buildWarning(f.warning));
+      const error = el("p", "field-error");
+      error.dataset.errorFor = f.name;
+      wrap.append(error);
+      return wrap;
+    }
+
+    /** Draw all sections into the page and build the side menu. */
+    function buildForm() {
+      const container = document.getElementById("sections");
+      SECTIONS.forEach((section, i) => {
+        const box = el("section", "card");
+        box.id = "sec-" + i;
+        box.dataset.menu = section.title;
+        box.append(el("h2", "font-semibold", section.title));
+        if (section.intro) box.append(el("p", "hint", section.intro));
+        const grid = el("div", "mt-4 grid gap-4 sm:grid-cols-2");
+        section.fields.forEach((f) => grid.append(buildField(f)));
+        box.append(grid);
+        container.append(box);
+      });
+      buildSideMenu();
+    }
+
+    // ------------------------------------------------------------------
+    // Side menu with scroll-spy
+    // ------------------------------------------------------------------
+
+    /** One link per section; the link of the section in view is highlighted. */
+    function buildSideMenu() {
+      const menu = document.getElementById("side-menu");
+      const sections = [...form.querySelectorAll("section[id]")];
+      sections.forEach((section, i) => {
+        const a = el("a", "side-link" + (i === 0 ? " active" : ""), section.dataset.menu);
+        a.href = "#" + section.id;
+        menu.append(a);
+      });
+
+      if (!("IntersectionObserver" in window)) return;
+      const links = [...menu.querySelectorAll(".side-link")];
+      const observer = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting) return;
+          links.forEach((l) => l.classList.toggle("active", l.getAttribute("href") === "#" + entry.target.id));
+        });
+      }, { rootMargin: "-20% 0px -65% 0px" });
+      sections.forEach((s) => observer.observe(s));
+    }
+
+    // ------------------------------------------------------------------
+    // Completeness bar
+    // ------------------------------------------------------------------
+
+    /** Recalculate the percentage of key fields that are filled in. */
+    function updateProgress() {
+      const filled = KEY_FIELDS.filter((n) => form.elements[n] && form.elements[n].value.trim() !== "").length;
+      const pct = Math.round((filled / KEY_FIELDS.length) * 100);
+      document.getElementById("progress-fill").style.width = pct + "%";
+      document.getElementById("progress-text").textContent = pct + "%";
+      document.getElementById("progress-bar").setAttribute("aria-valuenow", String(pct));
+    }
+
+    // ------------------------------------------------------------------
+    // Load / save
+    // ------------------------------------------------------------------
+
+    /** Copy saved profile values into the inputs. */
+    function fillForm(profile) {
+      TEXT_FIELDS.forEach((f) => { form.elements[f.name].value = profile[f.name] ?? ""; });
+      CHECK_FIELDS.forEach((f) => { form.elements[f.name].checked = Boolean(profile[f.name]); });
+      document.getElementById("setup-banner").classList.toggle("hidden", Boolean(profile.is_complete));
+      logoShow(profile.logo); // null when no logo has been uploaded
+      updateProgress();
+    }
+
+    /** A GSTIN contains the state code (first 2 digits) and the PAN (characters 3-12). */
+    function setupGstinAutofill() {
+      form.elements.gstin.addEventListener("blur", () => {
+        const gstin = form.elements.gstin.value.trim().toUpperCase();
+        if (gstin.length !== 15) return;
+        const state = form.elements.state_code;
+        if ([...state.options].some((o) => o.value === gstin.slice(0, 2))) state.value = gstin.slice(0, 2);
+        if (!form.elements.pan.value.trim()) form.elements.pan.value = gstin.slice(2, 12);
+        updateProgress();
+      });
+    }
+
+    form.addEventListener("input", updateProgress);
+    form.addEventListener("change", updateProgress);
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      clearErrors(form);
+      setBusy(saveButton, true, "Saving...");
+      try {
+        const payload = {};
+        TEXT_FIELDS.forEach((f) => { payload[f.name] = form.elements[f.name].value.trim(); });
+        CHECK_FIELDS.forEach((f) => { payload[f.name] = form.elements[f.name].checked; });
+        const profile = await apiRequest("/business/profile/", { method: "PUT", body: payload });
+        fillForm(profile); // show what the server actually saved (e.g. upper-cased GSTIN)
+        showToast("Profile saved.");
+      } catch (err) {
+        showFieldErrors(form, err);
+        showToast("Some details need your attention.", "error");
+        // Bring the first problem into view so the user sees what to fix.
+        const first = form.querySelector(".is-invalid") || form.querySelector("[data-form-message]");
+        if (first) first.scrollIntoView({ behavior: "smooth", block: "center" });
+      } finally {
+        setBusy(saveButton, false);
+      }
+    });
+
+    // ------------------------------------------------------------------
+    // Logo upload widget (was logo.js)
+    // ------------------------------------------------------------------
+    const LOGO_MAX_BYTES = 2 * 1024 * 1024;
+    const LOGO_TYPES = ["image/png", "image/jpeg", "image/webp"];
+
+    const logoImg = document.getElementById("logo-preview");
+    const logoEmpty = document.getElementById("logo-placeholder");
+    const logoFile = document.getElementById("logo-file");
+    const logoChoose = document.getElementById("logo-choose");
+    const logoRemove = document.getElementById("logo-remove");
+    const logoMessage = document.getElementById("logo-message");
+
+    /** Show the logo (url) or the empty placeholder (null). */
+    function logoShow(url) {
+      logoImg.classList.toggle("hidden", !url);
+      logoEmpty.classList.toggle("hidden", Boolean(url));
+      logoRemove.classList.toggle("hidden", !url);
+      if (url) logoImg.src = url;
+    }
+
+    /** Small status line under the logo buttons. */
+    function logoSay(text, ok = false) {
+      logoMessage.textContent = text;
+      logoMessage.className = "mt-1 text-sm " + (ok ? "text-ok" : "text-danger");
+    }
+
+    logoChoose.addEventListener("click", () => logoFile.click());
+
+    logoFile.addEventListener("change", async () => {
+      const file = logoFile.files[0];
+      logoFile.value = ""; // allows choosing the same file again later
+      if (!file) return;
+
+      // Quick checks for instant feedback. The server re-checks everything.
+      if (!LOGO_TYPES.includes(file.type)) return logoSay("Please choose a PNG, JPG or WebP image.");
+      if (file.size > LOGO_MAX_BYTES) return logoSay("The image must be 2 MB or smaller.");
+
+      setBusy(logoChoose, true, "Uploading...");
+      logoSay("");
+      try {
+        const data = new FormData();
+        data.append("logo", file);
+        const profile = await apiRequest("/business/logo/", { method: "PUT", body: data });
+        logoShow(profile.logo);
+        logoSay("Logo updated.", true);
+      } catch (err) {
+        logoSay(((err.errors && err.errors.logo) || [err.message]).join(" "));
+      } finally {
+        setBusy(logoChoose, false);
+      }
+    });
+
+    logoRemove.addEventListener("click", async () => {
+      try {
+        await apiRequest("/business/logo/", { method: "DELETE" });
+        logoShow(null);
+        logoSay("Logo removed.", true);
+      } catch (err) {
+        logoSay(err.message);
+      }
+    });
+
+    // ------------------------------------------------------------------
+    // Start
+    // ------------------------------------------------------------------
+    (async () => {
+      if (!requireLogin()) return;
+      renderNav("profile");
+      buildForm();
+      setupGstinAutofill();
+      form.classList.add("form-loading");
+      try {
+        const [states, profile] = await Promise.all([
+          apiRequest("/meta/states/"),
+          apiRequest("/business/profile/"),
+        ]);
+        states.forEach((s) => form.elements.state_code.append(new Option(`${s.code} - ${s.name}`, s.code)));
+        fillForm(profile); // after the state options exist, so the saved state can be selected
+      } catch (err) {
+        showFormMessage(form, err.message);
+      } finally {
+        form.classList.remove("form-loading");
+      }
+    })();
+  </script>
 </body>
 </html>
